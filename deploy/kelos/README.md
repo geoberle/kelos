@@ -6,16 +6,38 @@ allowlist identical. The spawner starts suspended. No Go runtime changes are mad
 
 ## Pins and setup
 
-Use the external upstream chart at commit
-`0f7b318ab66eee7f22079dbf0796dcb384ca9698`, path
-`internal/manifests/charts/kelos`. Do not vendor it. Its source Chart.yaml version
-is 0.1.0, which alone does not identify this snapshot. Check out and verify the
-commit before rendering. A published chart/image release corresponding to this
-source has **not** been verified. `RELEASE_PIN_REQUIRED` is deliberately not a
-working image tag: supply a verified immutable upstream release tag with
-`--set-string image.tag=...` before installing. Publication/access and target
-architecture checks remain outstanding; do not substitute latest or change
-package visibility. Hearth integration owns final artifact pins.
+Use official [Kelos v0.64.0](https://github.com/kelos-dev/kelos/releases/tag/v0.64.0),
+source commit `83a7405860df50e91e3313eb63b8e22f244fd943`, with OCI chart
+`oci://ghcr.io/kelos-dev/charts/kelos`, version `0.64.0` (appVersion `v0.64.0`).
+Its OCI manifest digest is
+`sha256:6abd9dd549bde51c07ed9aecc5356756685e87aad6208562d44bad23ed59a8eb`.
+The [release workflow](https://github.com/kelos-dev/kelos/blob/83a7405860df50e91e3313eb63b8e22f244fd943/.github/workflows/release.yaml)
+packages that chart and publishes release-tagged images. Do not vendor the chart.
+
+On 2026-11-15, anonymous GHCR manifest requests for `v0.64.0` verified the
+controller, Codex, spawner, worker-runner and session-runtime index digests now
+recorded in values.yaml. Each index contains Linux amd64 and arm64 images
+(alongside attestation entries). Digest references, not mutable tags alone,
+select these artifacts. The empty shared image tag prevents Helm appending a
+suffix to the controller digest; the released controller preserves explicitly
+tagged/digested managed image references. Other harnesses are not configured.
+No image was built or published and no registry visibility was changed.
+
+The earlier research snapshot `0f7b318ab66eee7f22079dbf0796dcb384ca9698`
+contains newer APIs, but this Workspace and TaskSpawner use only fields present
+in v0.64.0. Both passed offline validation against the packaged chart's
+v1alpha2 OpenAPI schemas, with unknown spec fields rejected. Helm lint and
+render also passed. This does not execute CEL or admission webhooks.
+
+Install cert-manager with its CRDs, controller, webhook and CA injector before
+Kelos. The chart unconditionally creates a cert-manager.io/v1 Issuer and
+Certificate for the controller webhook and uses CA injection for conversion
+and validation. Disabling event webhook servers does not remove this dependency.
+`crds.install: true` installs all 11 bundled Kelos CRDs, including Workspace,
+TaskSpawner and Task; retain the entire release-matched set. Keep the internal
+controller webhook reachable from the Kubernetes API server. No public ingress
+is required. Target-cluster cert-manager compatibility and server-side admission
+remain live acceptance checks.
 
 Create `kelos-system` for the controller and `kelos-agents` for the resources.
 Provision Secrets in `kelos-agents` through the deployment's secret manager:
@@ -38,10 +60,13 @@ unpublished changes before deleting Jobs or Tasks.
 Render and lint without deploying:
 
 ```sh
-UPSTREAM=/tmp/kelos-upstream-inspect
-[ "$(git -C "$UPSTREAM" rev-parse HEAD)" = 0f7b318ab66eee7f22079dbf0796dcb384ca9698 ]
-helm lint "$UPSTREAM/internal/manifests/charts/kelos" -f deploy/kelos/values.yaml
-helm template kelos "$UPSTREAM/internal/manifests/charts/kelos" \
+CHART_DIR=$(mktemp -d)
+helm pull oci://ghcr.io/kelos-dev/charts/kelos --version 0.64.0 \
+  --untar --untardir "$CHART_DIR"
+# Require the pull output digest to equal:
+# sha256:6abd9dd549bde51c07ed9aecc5356756685e87aad6208562d44bad23ed59a8eb
+helm lint "$CHART_DIR/kelos" -f deploy/kelos/values.yaml
+helm template kelos "$CHART_DIR/kelos" \
   --namespace kelos-system -f deploy/kelos/values.yaml > /tmp/kelos.yaml
 ```
 
