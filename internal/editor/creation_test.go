@@ -14,8 +14,12 @@ import (
 	"testing"
 
 	"github.com/google/go-github/v80/github"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/clientcmd"
 
 	"github.com/geoberle/kelos/internal/editor"
 )
@@ -24,8 +28,18 @@ func TestCurrentFindingsCreateRetainedTask(t *testing.T) {
 	for _, tc := range []struct {
 		name              string
 		inline, ambiguous bool
+		protection        string
+		blocked           bool
+		completed         bool
+		fresh             bool
 	}{
 		{name: "summary finding"},
+		{name: "completed attempt deduplicates", completed: true},
+		{name: "fresh attempt on same head", completed: true, fresh: true},
+		{name: "force pushes allowed", protection: `{"enforce_admins":{"enabled":true},"allow_force_pushes":{"enabled":true},"allow_deletions":{"enabled":false}}`, blocked: true},
+		{name: "missing protection", protection: `{}`, blocked: true},
+		{name: "administrator bypass", protection: `{"enforce_admins":{"enabled":false},"allow_force_pushes":{"enabled":false},"allow_deletions":{"enabled":false}}`, blocked: true},
+		{name: "deletion allowed", protection: `{"enforce_admins":{"enabled":true},"allow_force_pushes":{"enabled":false},"allow_deletions":{"enabled":true}}`, blocked: true},
 		{name: "inline finding", inline: true},
 		{name: "ambiguous inline finding", inline: true, ambiguous: true},
 	} {
@@ -84,6 +98,13 @@ func TestCurrentFindingsCreateRetainedTask(t *testing.T) {
 
 				var body string
 				switch r.URL.Path {
+				case "/repos/owner/repo/branches/agent-fix/protection":
+					body = tc.protection
+					if len(body) == 0 {
+						body = `{"enforce_admins":{"enabled":true},"allow_force_pushes":{"enabled":false},"allow_deletions":{"enabled":false}}`
+					}
+				case "/repos/owner/repo/compare/head...head":
+					body = `{"status":"identical"}`
 				case "/repos/owner/repo/pulls":
 					body = "[" + pr() + "]"
 				case "/repos/owner/repo/pulls/1":
@@ -116,6 +137,9 @@ func TestCurrentFindingsCreateRetainedTask(t *testing.T) {
 					body = `[{"filename":"main.go"}]`
 				case "/repos/owner/repo/issues/1/comments", "/repos/owner/repo/pulls/1/reviews":
 					body = "[]"
+					if r.Method == "POST" {
+						body = `{}`
+					}
 				case "/repos/owner/repo/pulls/1/comments":
 					body = "[]"
 					if tc.inline {
@@ -136,25 +160,80 @@ func TestCurrentFindingsCreateRetainedTask(t *testing.T) {
 				_, _ = w.Write([]byte(body))
 			}))
 			defer server.Close()
-			for range 2 {
+			for poll := range 3 {
+				if poll == 1 && tc.completed {
+					annotations := task["metadata"].(map[string]any)["annotations"].(map[string]any)
+					var assigned editor.Assignment
+					if e := json.Unmarshal([]byte(annotations["orchestrator.kelos.dev/assignment"].(string)), &assigned); e != nil {
+						t.Fatal(e)
+					}
+					result, _ := json.Marshal(editor.Result{Head: "head", Commit: "head", Dispositions: []editor.Disposition{{ID: assigned.Findings[0].ID, Outcome: "already-satisfied", Explanation: "Verified the scenario."}}})
+					task["status"] = map[string]any{"phase": "Succeeded", "results": map[string]any{"editor-result": string(result)}}
+					if tc.fresh {
+						assigned.Attempt = 1
+						encoded, _ := json.Marshal(assigned)
+						annotations["orchestrator.kelos.dev/assignment"] = string(encoded)
+						task["metadata"].(map[string]any)["name"] = "previous-attempt"
+					}
+				}
+
 				client := github.NewClient(server.Client())
 				client.BaseURL, _ = url.Parse(server.URL + "/")
 				kube, err := dynamic.NewForConfig(&rest.Config{Host: server.URL})
 				if err != nil {
 					t.Fatal(err)
 				}
+				if path := os.Getenv("EDITOR_TEST_KUBECONFIG"); len(path) > 0 && tc.name == "summary finding" {
+					config, e := clientcmd.BuildConfigFromFlags("", path)
+					if e != nil {
+						t.Fatal(e)
+					}
+					kube, e = dynamic.NewForConfig(config)
+					if e != nil {
+						t.Fatal(e)
+					}
+					if poll == 0 {
+						_, e = kube.Resource(schema.GroupVersionResource{Version: "v1", Resource: "namespaces"}).Create(context.Background(), &unstructured.Unstructured{Object: map[string]any{"apiVersion": "v1", "kind": "Namespace", "metadata": map[string]any{"name": "agents"}}}, metav1.CreateOptions{})
+						if e != nil {
+							t.Fatal(e)
+						}
+					}
+				}
 				err = editor.Poll(context.Background(), client, kube, []string{"owner/repo"}, editor.Config{Namespace: "agents", Workspace: "repo", AgentConfig: "editor", Secret: "codex"}, "controller")
-				if (err != nil) != tc.ambiguous {
+				if (err != nil) != (tc.ambiguous || tc.blocked) {
 					t.Fatalf("unexpected error: %v", err)
 				}
 			}
-			if tc.ambiguous {
+			if len(os.Getenv("EDITOR_TEST_KUBECONFIG")) > 0 && tc.name == "summary finding" {
+				config, e := clientcmd.BuildConfigFromFlags("", os.Getenv("EDITOR_TEST_KUBECONFIG"))
+				if e != nil {
+					t.Fatal(e)
+				}
+				kube, e := dynamic.NewForConfig(config)
+				if e != nil {
+					t.Fatal(e)
+				}
+				list, e := kube.Resource(schema.GroupVersionResource{Group: "kelos.dev", Version: "v1alpha2", Resource: "tasks"}).Namespace("agents").List(context.Background(), metav1.ListOptions{})
+				if e != nil {
+					t.Fatal(e)
+				}
+				if len(list.Items) != 1 {
+					t.Fatalf("real API Tasks=%d", len(list.Items))
+				}
+				task = list.Items[0].Object
+				creates = 1
+			}
+			if tc.ambiguous || tc.blocked {
 				if creates != 0 {
 					t.Fatal("ambiguous finding created Task")
 				}
 				return
 			}
-			if creates != 1 {
+			wantCreates := 1
+			if tc.fresh {
+				wantCreates = 2
+			}
+			if creates != wantCreates {
 				t.Fatalf("Task creates=%d want 1", creates)
 			}
 			spec := task["spec"].(map[string]any)
