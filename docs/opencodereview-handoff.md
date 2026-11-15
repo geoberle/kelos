@@ -51,6 +51,13 @@ Consumer contract:
   fields. Manifest schema is `ocr.run-manifest/v1`; completion is
   `manifest.terminal_state`. Bind resolved base as well as head to the intended
   review range. OCR's own `manifest.run_id` is not the GitHub run ID.
+  For the pinned full-range Action, `resolved_base` is the Git merge base of
+  the fetched base branch and event PR head, not necessarily the PR API's
+  current base SHA. Verify that range independently; comparing it directly to
+  the base-branch tip would reject valid reviews after the branches diverge.
+  The manifest does not carry the GitHub PR number or workflow run/attempt;
+  those correlations must come from trusted GitHub evidence, never from
+  findings, artifact naming alone, or OCR's session ID.
 - Validate `coverage.selected`, `completed`, `reused`, `failed`, `waived`, and
   `excluded`. Preserve all findings even if inline publication cannot place them.
   Unknown schemas, malformed/missing artifacts and failed publication are not
