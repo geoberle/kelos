@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 
@@ -145,6 +146,15 @@ func TestEditorResultAccounting(t *testing.T) {
 			}
 			if len(replies) != want {
 				t.Fatalf("got %d replies, want %d", len(replies), want)
+			}
+			if tc.name == "fixed" {
+				expected, err := os.ReadFile("testdata/fixed.golden")
+				if err != nil {
+					t.Fatal(err)
+				}
+				if replies[0]["body"] != string(expected) {
+					t.Fatalf("reply differs from golden: %q", replies[0]["body"])
+				}
 			}
 			if want == 1 && !strings.Contains(replies[0]["body"], "[finding-0](https://github.com/acme/repo/pull/1#issuecomment-10): **"+tc.outcome+"**") {
 				t.Fatalf("missing correlation: %v", replies)

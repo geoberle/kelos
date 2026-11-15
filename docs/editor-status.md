@@ -29,8 +29,8 @@ summary, and never resolves threads. Needs-human remains pending. Keep Task and
 workspace retention intact; deletion is not a retry mechanism.
 
 Deterministic coverage currently exercises enrollment and retained Task stopping
-through GitHub and Kubernetes HTTP endpoints, including repeated polls. Real API
-server/envtest validation, successful full-cycle fixtures, concurrent controller
-serialization, inline thread correlation, and live output capture remain pending.
+through GitHub and Kubernetes HTTP endpoints, including repeated polls, disposition validation, ancestry rejection, needs-human
+reporting, and golden reply correlation. Real API
+server/envtest validation, successful full-cycle fixtures, inline thread correlation, and live output capture remain pending.
 No live cluster credentials were used and no activation was performed. Run one
 controller instance; multiple concurrent controllers are not yet supported.
