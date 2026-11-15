@@ -78,6 +78,9 @@ Consumer contract:
 
 ## Live acceptance still required
 
+See [Hermine preflight and acceptance procedure](ocr-acceptance.md) for verified
+cluster readiness, exact missing inputs and reproducible checks.
+
 No live model or deployment test has run. In an isolated test repository/cluster,
 verify runner image pull/startup, architecture, Node/npm installation permissions,
 outbound connectivity and enforced network isolation; install trusted workflow
