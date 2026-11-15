@@ -14,6 +14,7 @@ import (
 	"github.com/google/go-github/v80/github"
 
 	"github.com/geoberle/kelos/internal/admission"
+	merge "github.com/geoberle/kelos/internal/merge"
 	"github.com/geoberle/kelos/internal/review"
 )
 
@@ -22,6 +23,7 @@ type RawOptions struct {
 	TokenFile  string
 }
 type configuration struct {
+	MergeEnabled    bool     `json:"mergeEnabled,omitempty"`
 	Version         string   `json:"version"`
 	Repositories    []string `json:"repositories"`
 	PollInterval    string   `json:"pollInterval"`
@@ -66,6 +68,9 @@ func (o *RawOptions) Validate() (*ValidatedOptions, error) {
 	if config.ControllerLogin == "geoberle" || config.ControllerLogin == "github-actions[bot]" {
 		return nil, fmt.Errorf("controllerLogin must be a dedicated controller identity")
 	}
+	if config.MergeEnabled && len(config.ControllerLogin) == 0 {
+		return nil, fmt.Errorf("mergeEnabled requires controllerLogin")
+	}
 	interval, err := time.ParseDuration(config.PollInterval)
 	if err != nil || interval < time.Second {
 		return nil, fmt.Errorf("pollInterval must be at least 1s")
@@ -94,6 +99,11 @@ func (o *Options) Run(ctx context.Context, logger logr.Logger) error {
 		if len(o.config.ControllerLogin) > 0 {
 			if err := review.Poll(ctx, o.client, o.config.Repositories, o.config.ControllerLogin); err != nil {
 				logger.Error(err, "Review poll failed")
+			}
+		}
+		if o.config.MergeEnabled {
+			if err := merge.Poll(ctx, o.client, o.config.Repositories, o.config.ControllerLogin); err != nil {
+				logger.Error(err, "Merge poll failed")
 			}
 		}
 		select {

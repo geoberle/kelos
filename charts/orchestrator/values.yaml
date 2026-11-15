@@ -10,6 +10,8 @@ configuration:
   pollInterval: 1m
   # Dedicated GitHub identity; empty keeps review reconciliation disabled.
   controllerLogin: ""
+  # Enable only after target repository enforcement has been verified.
+  mergeEnabled: false
 resources:
   requests:
     cpu: 10m
