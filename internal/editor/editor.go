@@ -57,6 +57,32 @@ type Disposition struct {
 	Explanation string `json:"explanation"`
 }
 
+// Validate checks complete, unambiguous accounting of the retained assignment.
+// A valid needs-human disposition is still pending; callers must not mark it handled.
+// Publication and commit ancestry must be verified separately against GitHub.
+func (r Result) Validate(a Assignment) error {
+	if r.Head != a.Head || len(r.Commit) == 0 || len(a.Findings) == 0 {
+		return fmt.Errorf("invalid editor result identity")
+	}
+	assigned := map[string]bool{}
+	for _, f := range a.Findings {
+		if len(f.ID) == 0 || assigned[f.ID] {
+			return fmt.Errorf("invalid assigned finding identity")
+		}
+		assigned[f.ID] = true
+	}
+	if len(r.Dispositions) != len(assigned) {
+		return fmt.Errorf("editor findings remain pending")
+	}
+	for _, d := range r.Dispositions {
+		if !assigned[d.ID] || len(strings.TrimSpace(d.Explanation)) == 0 || (d.Outcome != "fixed" && d.Outcome != "already-satisfied" && d.Outcome != "needs-human") {
+			return fmt.Errorf("invalid editor disposition")
+		}
+		delete(assigned, d.ID)
+	}
+	return nil
+}
+
 func Poll(ctx context.Context, c *github.Client, k dynamic.Interface, repositories []string, config Config, controllerLogin string) error {
 	var failures []error
 	for _, repository := range repositories {
@@ -94,7 +120,6 @@ func Poll(ctx context.Context, c *github.Client, k dynamic.Interface, repositori
 func reconcile(ctx context.Context, c *github.Client, k dynamic.Interface, config Config, owner, repo string, pr *github.PullRequest, controllerLogin string) error {
 	resource := k.Resource(tasks).Namespace(config.Namespace)
 	key := fmt.Sprintf("%x", sha256.Sum256([]byte(fmt.Sprintf("%s/%s#%d", owner, repo, pr.GetNumber()))))[:32]
-	name := "editor-" + key + "-" + fmt.Sprintf("%x", sha256.Sum256([]byte(pr.GetHead().GetSHA())))[:16]
 	existing, err := resource.List(ctx, metav1.ListOptions{LabelSelector: "orchestrator.kelos.dev/pr=" + key})
 	if err != nil {
 		return err
@@ -107,9 +132,6 @@ func reconcile(ctx context.Context, c *github.Client, k dynamic.Interface, confi
 		}
 		if err := consume(ctx, c, owner, repo, pr, task, controllerLogin); err != nil {
 			return err
-		}
-		if task.GetName() == name {
-			return nil
 		}
 	}
 	raw, err := review.CurrentEvidence(ctx, c, owner, repo, pr)
@@ -133,6 +155,16 @@ func reconcile(ctx context.Context, c *github.Client, k dynamic.Interface, confi
 	}
 	if err := json.Unmarshal(raw, &evidence); err != nil {
 		return err
+	}
+	name := "editor-" + key + "-" + fmt.Sprintf("%x", sha256.Sum256([]byte(fmt.Sprintf("%s/%d/%d", evidence.Head, evidence.Run, evidence.Attempt))))[:16]
+	for _, task := range existing.Items {
+		var assigned Assignment
+		if err := json.Unmarshal([]byte(task.GetAnnotations()["orchestrator.kelos.dev/assignment"]), &assigned); err != nil {
+			return err
+		}
+		if assigned.Head == evidence.Head && assigned.Run == evidence.Run && assigned.Attempt == evidence.Attempt {
+			return nil
+		}
 	}
 	summaryID, err := summaryCommentID(evidence.Summary, owner, repo, pr.GetNumber())
 	if err != nil {
@@ -208,6 +240,13 @@ func reconcile(ctx context.Context, c *github.Client, k dynamic.Interface, confi
 	if current.GetHead().GetSHA() != assignment.Head {
 		return nil
 	}
+	protection, _, err := c.Repositories.GetBranchProtection(ctx, owner, repo, current.GetHead().GetRef())
+	if err != nil {
+		return fmt.Errorf("verify editor branch protection: %w", err)
+	}
+	if protection == nil || protection.EnforceAdmins == nil || !protection.EnforceAdmins.Enabled || protection.AllowForcePushes == nil || protection.AllowForcePushes.Enabled || protection.AllowDeletions == nil || protection.AllowDeletions.Enabled {
+		return fmt.Errorf("editor requires administrator-enforced protection prohibiting force pushes and deletion")
+	}
 	task := &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": "kelos.dev/v1alpha2", "kind": "Task",
 		"metadata": map[string]any{"name": name, "namespace": config.Namespace, "labels": map[string]any{"orchestrator.kelos.dev/pr": key}, "annotations": map[string]any{"orchestrator.kelos.dev/assignment": string(encoded)}},
@@ -272,15 +311,12 @@ func consume(ctx context.Context, c *github.Client, owner, repo string, pr *gith
 			return fmt.Errorf("editor result is not on the current PR branch")
 		}
 	}
+	if err := result.Validate(assignment); err != nil {
+		return err
+	}
 	dispositions := map[string]Disposition{}
 	for _, d := range result.Dispositions {
-		if len(strings.TrimSpace(d.Explanation)) == 0 || len(dispositions[d.ID].ID) > 0 || (d.Outcome != "fixed" && d.Outcome != "already-satisfied" && d.Outcome != "needs-human") {
-			return fmt.Errorf("invalid editor disposition")
-		}
 		dispositions[d.ID] = d
-	}
-	if len(dispositions) != len(assignment.Findings) {
-		return fmt.Errorf("editor findings remain pending")
 	}
 	pending := false
 	body := "<!-- kelos-editor/v1 " + task.GetName() + " -->\n"
