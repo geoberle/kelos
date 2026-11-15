@@ -5,6 +5,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -519,6 +520,12 @@ func humanFeedback(ctx context.Context, c *github.Client, owner, repo string, nu
 		}
 		for _, v := range comments {
 			if v.GetUser().GetLogin() == "geoberle" {
+				fields := strings.Fields(v.GetBody())
+				if len(fields) == 2 && fields[0] == "reassess" && len(fields[1]) == 40 {
+					if _, err := hex.DecodeString(fields[1]); err == nil {
+						continue
+					}
+				}
 				return true, nil
 			}
 		}

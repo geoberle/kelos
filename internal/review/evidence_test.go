@@ -28,6 +28,7 @@ func TestVerifiedReviewEvidence(t *testing.T) {
 		attempt              int
 		actor                string
 	}{
+		{"reassessment command does not become feedback", 0, true, "", "", false, 2, "controller"},
 		{"complete published review survives restart", 0, true, "", "", false, 2, "controller"},
 		{"green workflow with publication failures does not complete", 1, false, "", "", false, 2, "controller"},
 		{"duplicate JSON fields cannot complete", 0, false, `"operation":"review"`, `"operation":"bad","operation":"review"`, false, 2, "controller"},
@@ -194,6 +195,10 @@ func TestVerifiedReviewEvidence(t *testing.T) {
 				if tc.name == "paginated changed files are all covered" && r.URL.Path == "/repos/owner/repo/pulls/1/files" && r.URL.Query().Get("page") != "2" {
 					w.Header().Set("Link", "<"+server.URL+"/repos/owner/repo/pulls/1/files?page=2>; rel=\"next\"")
 					body = "[]"
+				}
+				if tc.name == "reassessment command does not become feedback" && r.URL.Path == "/repos/owner/repo/issues/1/comments" {
+					body = strings.TrimSuffix(body, "]") + `,{"id":80,"body":"reassess aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","user":{"id":100,"login":"geoberle"}}]`
+					body = strings.Replace(body, "[,", "[", 1)
 				}
 				if tc.name == "new human feedback prevents completion" && r.URL.Path == "/repos/owner/repo/issues/1/comments" {
 					commentReads++
