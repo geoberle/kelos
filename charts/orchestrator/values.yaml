@@ -1,0 +1,16 @@
+image:
+  repository: ghcr.io/geoberle/kelos-orchestrator
+  tag: "0.1.0"
+  digest: ""
+imagePullSecrets: []
+credentialSecret: github-admission
+configuration:
+  version: v1
+  repositories: []
+  pollInterval: 1m
+resources:
+  requests:
+    cpu: 10m
+    memory: 32Mi
+  limits:
+    memory: 128Mi
