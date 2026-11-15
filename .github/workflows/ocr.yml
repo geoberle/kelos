@@ -1,0 +1,32 @@
+name: OCR
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, labeled, ready_for_review]
+permissions:
+  contents: read
+  pull-requests: write
+concurrency:
+  group: ocr-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+jobs:
+  review:
+    if: >-
+      github.repository == 'geoberle/kelos' &&
+      contains(github.event.pull_request.labels.*.name, 'agent-managed') &&
+      (github.event.action != 'labeled' || github.event.label.name == 'agent-managed')
+    runs-on: kelos-ocr
+    timeout-minutes: 45
+    steps:
+      # The action checks out the trusted base; never check out or execute PR code here.
+      - uses: alibaba/open-code-review@7e5ce06c88de5ce81df5dc4f24e2e485b517fae8 # v1.13.10
+        with:
+          ocr_version: '1.13.10'
+          llm_url: ${{ secrets.OCR_LLM_URL }}
+          llm_auth_token: ${{ secrets.OCR_LLM_AUTH_TOKEN }}
+          llm_model: ${{ vars.OCR_LLM_MODEL }}
+          llm_use_anthropic: 'false'
+          llm_protocol: openai
+          rule: .opencodereview/rule.json
+          upload_artifacts: 'true'
+          incremental: 'false'
+          resolve_outdated: 'false'
