@@ -3,8 +3,7 @@
 `internal/merge.Poll` implements the human approval path. Runtime execution is
 opt-in through `configuration.mergeEnabled: true` and requires the dedicated
 `controllerLogin`. The chart leaves merging disabled until repository enforcement
-and credentials have been validated. No live merge or repository policy change
-has been performed during implementation.
+and credentials have been validated. No live merge has been performed during implementation.
 
 The authorized human, initially `geoberle`, posts `lgtm <full SHA>`. Whitespace
 around the command and hexadecimal case are normalized. The comment must be
@@ -57,10 +56,11 @@ a head returns, and ambiguous merge responses. Golden fixtures assert the exact
 merge payload and retained revocation record. Race tests, formatting and lint run
 with `GOTOOLCHAIN=go1.25.5`.
 
-The real private `geoberle/kelos` repository currently returns a plan-related 403
-for both protection APIs. Live positive/negative merge acceptance therefore
-remains blocked until an appropriate repository with enforcement is available.
-No visibility or subscription change is implied. The automated-assessment source
+The operator made `geoberle/kelos` public on 2026-11-16. The protection APIs no
+longer return the plan-related 403: `main` returns “Branch not protected” and its
+effective rules list is empty. Live merge acceptance still requires configured
+required CI and merge enforcement. The separate `agent/**` rule protects editor
+branches against force pushes and deletion, including administrators. The automated-assessment source
 of approval is implemented by issue #9 and must use this same gate contract.
 
 References: [branch protection API](https://docs.github.com/en/rest/branches/branch-protection),

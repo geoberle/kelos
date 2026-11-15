@@ -18,7 +18,10 @@ OCR findings to start another Task; there is no repair-round limit.
 The prompt requires editing from the assigned head, a remote-head recheck, and
 regular push only. Divergence stops work and preserves the workspace; no force
 push or rebase onto human work is allowed. These are agent execution instructions,
-not an independently enforced Git transport sandbox. Use the existing OCR Action
+not an independently enforced Git transport sandbox. ADR 0009 requires GitHub
+protection against force pushes and deletion without bypass; `agent/**` is now
+protected on the public repository. Runtime verification of effective protection
+before editor execution remains to be implemented. Use the existing OCR Action
 on synchronize with credentials that trigger Actions. The editor does not merge.
 
 `status.results.editor-result` is single-line JSON with `head`, `commit`, and
