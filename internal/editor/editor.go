@@ -197,6 +197,9 @@ func consume(ctx context.Context, c *github.Client, owner, repo string, pr *gith
 	if err := json.Unmarshal([]byte(task.GetAnnotations()["orchestrator.kelos.dev/assignment"]), &assignment); err != nil {
 		return err
 	}
+	if assignment.Repository != owner+"/"+repo || assignment.PR != pr.GetNumber() || len(assignment.Head) == 0 || len(assignment.Findings) == 0 {
+		return fmt.Errorf("invalid persisted editor assignment")
+	}
 	raw, _, _ := unstructured.NestedString(task.Object, "status", "results", "editor-result")
 	var result Result
 	if err := json.Unmarshal([]byte(raw), &result); err != nil {
