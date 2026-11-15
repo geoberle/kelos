@@ -616,3 +616,13 @@ func decodeEvidence(data []byte, target any) error {
 	}
 	return json.Unmarshal(data, target)
 }
+
+// CurrentEvidence revalidates the trusted workflow and returns current findings.
+// Historical status comments alone cannot authorize a new editor.
+func CurrentEvidence(ctx context.Context, c *github.Client, owner, repo string, pr *github.PullRequest) ([]byte, error) {
+	decision, err := evaluate(ctx, c, owner, repo, pr)
+	if err != nil || decision.Evidence == nil {
+		return nil, err
+	}
+	return json.Marshal(decision.Evidence)
+}
