@@ -4,13 +4,13 @@ Design discussion in progress. Implementation has not started.
 
 ## Agreed requirements
 
-- Issue admission is deterministic: the issue-only `ready-for-agent` label expresses human readiness, and all blocking prerequisites must be fulfilled before implementation starts.
+- Issue admission is deterministic: the issue-only `ready-for-agent` label expresses human readiness, and all blocking prerequisites must be fulfilled for admission. Eligibility is decided at native discovery; already-created Tasks continue after later changes.
 - Repository selection is explicit.
 - Deterministic Go orchestration runs as a dedicated Kubernetes Deployment in the same cluster as Kelos.
 - For issue implementation, Go applies `agent-start` once admission conditions pass. A native Kelos TaskSpawner watches that label and owns Task creation and deduplication.
 - Custom Go orchestration handles issue admission, review-feedback polling and Task scheduling, and merge authorization. OpenCodeReview reviews code; Kelos implements fixes. See [ADR 0004](adr/0004-poll-review-feedback.md) and [ADR 0005](adr/0005-use-opencodereview-as-sole-reviewer.md).
 - Merge assessment evaluates suitability for automatic merging under policy, separately from tests and code-review approval. Its result includes a recommendation and a concise explanation of why or why not.
-- The `lgtm` label authorizes merging whether applied by an authorized human or by Go after a favorable assessment. Approval is bound to a commit; the merge tool removes stale approval labels and ensures it merges only the approved commit. New commits invalidate approval from either source.
+- The `lgtm` label displays validated approval: an authorized human posts `lgtm <full SHA>`, or Go consumes a favorable assessment. A bare label is not approval evidence. Approval is bound to a commit; the merge tool removes stale approval labels and ensures it merges only the approved commit. New commits invalidate approval from either source.
 
 - For PR assessment, Go creates a Kelos Task for a specific PR commit, consumes and validates its structured result, and publishes the suggestion label and concise explanation. The assessment uses the full Codex harness with repository access, tools, skills, and agent capabilities; see [ADR 0003](adr/0003-assess-prs-through-kelos.md).
 - Assessment starts only for non-draft PRs after required tests and reviews pass.
@@ -28,7 +28,7 @@ Design discussion in progress. Implementation has not started.
 - The editor also publishes a concise reply to the original feedback. For inline review comments, reply in the existing review thread; for conversation comments, clearly reference the originating comment. Human-readable replies accompany the structured outcomes used by Go.
 - The editor does not resolve review threads. Accepting the fix and resolving its thread remain the reviewer's or human's responsibility.
 - Failed or conflicted editing Tasks stop for human intervention without automatically launching another editor. Preserve pending feedback and report the failure; successful OCR/fix cycles remain unlimited.
-- Human intervention has two paths: an authorized human applies `lgtm` to authorize merging, or leaves a comment that triggers the fix-and-review loop without an explicit command.
+- Human intervention has two paths: an authorized human posts `lgtm <full SHA>` to authorize merging, or leaves a comment that triggers the fix-and-review loop without an explicit command.
 - Merging with valid `lgtm` requires green CI, no `hold`, and no unresolved GitHub review threads. These conditions apply equally to human and automated approval. The merge operation does not additionally require `review-done`; that label gates automated assessment, not an existing approval.
 - Initially authorize GitHub user `geoberle` for comment-triggered work and applying `lgtm`.
 - Green CI means all checks required by the repository's GitHub rules have passed, with none pending. Reuse those requirements rather than maintain a separate check list.
@@ -41,7 +41,7 @@ Design discussion in progress. Implementation has not started.
 - Run issue admission and PR assessment/merging as separate reconciliation loops in one Go binary and Kubernetes Deployment.
 - The cluster is unreachable from the internet; use outbound polling rather than inbound GitHub webhooks.
 - Comments from explicitly authorized humans should trigger follow-up work. Bot status and assessment comments are excluded; the polling implementation remains to be determined.
-- Store workflow evidence in GitHub comments and Kelos Task resources without a separate database. Reliable commit binding of human approval remains to be verified.
+- Store workflow evidence in GitHub comments and Kelos Task resources without a separate database. Human approval comments carry the full approved SHA.
 - Review and repair may run on draft PRs. Assessment and merging require a non-draft PR, including when `lgtm` is present.
 - Partial, failed, or missing review results block `review-done`; incomplete execution is not a clean review.
 - Failed or partial OCR runs stop for manual rerun initially. Go publishes a concise explanation; this does not impose a limit on successful review/fix cycles.
@@ -67,3 +67,5 @@ At upstream commit `0f7b318ab66eee7f22079dbf0796dcb384ca9698`, polling issue/PR 
 Native `githubPullRequests` polling discovers PRs by label and can start initial review Tasks without inbound connectivity. Follow-up triggers support exact whole-line commands in comments/reviews, or qualifying current-head `changes_requested` reviews. Arbitrary prose comments and new commits alone do not retrigger completed Tasks. Commands support role-based authorization; review-state triggers do not apply that command authorization.
 
 Retriggers must be newer than the existing Task's completion time, so feedback received during a running Task does not queue another run. SessionSpawner supports webhooks only. These limitations motivated the Go feedback poller in ADR 0004.
+
+Before merging, Go rechecks mutable gates and submits the approved SHA as a precondition. The remaining race with newly arriving hold/feedback is accepted; repository requirements remain enforced without bypass.

@@ -56,3 +56,5 @@ Use Helm rollback to restore a previous chart/image digest. Publication does not
 update Hearth pins or deploy to Hermine. Those changes belong to the integration
 slice. Native target execution, authenticated registry pull, live GitHub mutation,
 and Kelos Task deduplication require separate evidence before acceptance.
+
+Admission is decided at native Kelos discovery. An already-created Task continues after eligibility changes; no pre-start recheck or automatic cancellation is required.

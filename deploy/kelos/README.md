@@ -66,21 +66,10 @@ Failed executions are not automatically retried by this configuration.
 
 Suspend stops new discovery, not existing Tasks. Withdrawing `agent-start` also
 cannot cancel a previously discovered Task. Native GitHub filters are evaluated
-at discovery, not immediately before execution. This is an unresolved admission
-race, not a cancellation guarantee.
-
-Execution-time options for the parent to decide:
-
-1. A deterministic preflight in `worker.podOverrides.extraInitContainers` can
-   re-read GitHub eligibility before starting the harness. It requires an approved
-   check executable/image, credentials and failure/retry semantics; labels alone
-   still lag blocker changes. No such check is installed here.
-2. An upstream controller execution gate could perform the same check before
-   launching the Job, but requires upstream changes and still has a post-check
-   race with mutable GitHub state.
-
-An agent prompt recheck is not a deterministic admission gate and is not used
-as a substitute. Resolve this policy before unattended activation.
+at discovery, not immediately before execution. Admission is decided at native Kelos discovery. The operator accepts that an
+already-created Task continues if readiness or blockers subsequently change.
+Go withdraws the label on the next successful poll to prevent later discovery.
+No execution-time preflight or automatic cancellation is required.
 
 ## Integration acceptance procedure (not yet executed)
 

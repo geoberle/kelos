@@ -1,6 +1,6 @@
 # Human approval binding: issue #8 feasibility
 
-Status: blocked before implementation. Investigation dated 2026-11-15.
+Status: decision adopted after investigation, 2026-11-15. Humans approve with `lgtm <full SHA>` comments. Go performs a final gate recheck and SHA-conditional merge; the remaining hold/feedback race is accepted. The evidence below explains why label-only approval was rejected.
 
 A human-applied `lgtm` label cannot currently be proven to identify the intended PR head using the documented polling APIs. Do not bind it to the first observed head. This is a finding, not a change to the agreed interaction or ADRs. Issue #8's remaining implementation and live merge acceptance criteria remain unmet.
 
@@ -55,7 +55,7 @@ Concrete race: poll sees approved SHA H, no hold and no pending feedback; a huma
 1. **Approve an explicit full SHA in a comment**, for example `lgtm <40-character SHA>`. Persist actor, comment identity/version and SHA as evidence; label becomes a display of validated approval. This works for a PR author and survives downtime without guessing the approved head. Editing/deleting approval, revocation, feedback ordering and A→B→A invalidation still need defined handling. Ordinary feedback remains command-free; only approval changes.
 2. **Use an authorized approving GitHub review with its recorded commit_id**, then display `lgtm`. The [reviews API](https://docs.github.com/en/rest/pulls/reviews#list-reviews-for-a-pull-request) returns commit-bound review records. Require the exact current SHA and valid review state; do not infer it from submission time. Native self-approval restrictions make this unsuitable as the sole path when the authorized maintainer authors the PR. Dismissal and feedback races still require resolution.
 
-Neither alternative is adopted here. They preserve approval of a particular commit while changing the input interaction. Neither makes label/feedback reads atomic with merge. If strict publication cancellation cannot be represented by server-enforced state or agreed coordination, retain human direct merging rather than claim automated guarantees that the API does not provide.
+The operator selected alternative 1 after this investigation. They preserve approval of a particular commit while changing the input interaction. Neither makes label/feedback reads atomic with merge. If strict publication cancellation cannot be represented by server-enforced state or agreed coordination, retain human direct merging rather than claim automated guarantees that the API does not provide.
 
 ## Validation and handoff
 
@@ -63,4 +63,4 @@ Verified ancestry, read-only issue/timeline/permission responses, live schema fi
 
 After an interaction and race contract are explicitly selected, implementation must use the approved GitHub HTTP-fixture/Kubernetes API boundary, table-driven Go cases and golden fixtures. Cover downtime, missing history, equal timestamps, ordinary and force pushes, A→B→A, unauthorized/revoked actors, edited/deleted approval, stale SHA/409, hold/feedback arrival and ambiguous merge responses. Fixtures can verify conservative controller behavior; they cannot prove stronger GitHub atomicity than the API provides. Continue using direct SDKs, logr, len emptiness checks and raw/validated/completed options.
 
-Stop issue #8 implementation at this feasibility gate. No proof/design authorizing label-only automated merging is available.
+Issue #8 may proceed with the selected full-SHA comment interaction and accepted final-recheck race. Label-only automated merging remains unsupported.
