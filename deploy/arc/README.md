@@ -17,12 +17,13 @@ privileged containers are needed. Runners are ephemeral and have no mounted
 Kubernetes API token. Do not share this scale set with untrusted build jobs.
 Restrict repository workflow changes and runner access to trusted maintainers.
 
-Provision `arc-github-app` in `arc-runners` outside Git, using ARC's supported
-GitHub App Secret keys `github_app_id`, `github_app_installation_id`, and
-`github_app_private_key`. Provision Actions secrets `OCR_LLM_URL` and
-`OCR_LLM_AUTH_TOKEN` and variable `OCR_LLM_MODEL`. No credential values are
-provided. Grant the App only the permissions ARC requires for the selected
-repository. OCR publishes using the job's short-lived GitHub token.
+Provision `arc-github-pat` in `arc-runners` outside Git, using ARC's supported
+`github_token` Secret key. The operator selected a classic personal access token
+with `repo` scope for repository runner registration. Track its expiry and rotate
+the Secret before expiration. Hearth reads it from ignored `arc_github_token`.
+Provision Actions secrets `OCR_LLM_URL` and `OCR_LLM_AUTH_TOKEN` and variable
+`OCR_LLM_MODEL`. OCR publishes using the job's short-lived GitHub token.
+
 
 Allow outbound DNS/HTTPS to GitHub Actions/API/artifact endpoints, GHCR, npm and
 the selected model endpoint. No inbound internet connection is required. Apply

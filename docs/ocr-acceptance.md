@@ -17,8 +17,8 @@ Validated from branch `ocr-arc-acceptance`, initially at
   geoberle/kelos` both returned empty lists. Required inputs are
   `OCR_LLM_URL`, `OCR_LLM_AUTH_TOKEN` and `OCR_LLM_MODEL`.
 - `/tmp/kelos-hearth-integration/kelos/deploy/values.local.yaml` is absent.
-  Supply ARC App ID, installation ID and private key through Hearth's ignored
-  local credential input. Supply the separate implementation App/PAT credential
+  The operator subsequently selected PAT authentication; supply `arc_github_token`
+  through Hearth's ignored local credential input. Supply the separate implementation App/PAT credential
   there as well. The available interactive gh login does not establish that the
   eventual implementation identity has the required permissions or triggers.
 
