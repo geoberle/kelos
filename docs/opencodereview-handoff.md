@@ -90,3 +90,17 @@ JSON for complete, partial, failed and skipped reviews, plus missing artifacts,
 and exercise the future Go consumer against these captures. Verify excluded
 coverage and classification explicitly. Local render/lint checks do not satisfy
 these acceptance criteria, and no credentials or registry changes are implied.
+
+## Controller evidence transport
+
+The trusted workflow uploads `kelos-ocr-identity-<run>-<attempt>` before invoking
+OCR and `kelos-ocr-publication-<run>-<attempt>` afterward. `identity.json` carries
+repository, PR, run, attempt, event head and base. `publication.json` carries the
+same identity, the Action's actual `MERGE_BASE`, summary URL, total finding count
+and failed-publication count. These are workflow-produced evidence, separate
+from model output. The consumer verifies the summary's existence and trusted
+GitHub Actions authorship, and rejects publication failures even on green runs.
+
+The `OCR PR #<number>` run name disambiguates unrelated runs when GitHub omits the
+PR association. The consumer persists findings and correlation in a dedicated
+controller-authored status comment; see [consumer behavior](review-consumer-status.md).

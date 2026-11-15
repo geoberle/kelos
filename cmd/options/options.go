@@ -14,6 +14,7 @@ import (
 	"github.com/google/go-github/v80/github"
 
 	"github.com/geoberle/kelos/internal/admission"
+	"github.com/geoberle/kelos/internal/review"
 )
 
 type RawOptions struct {
@@ -21,9 +22,10 @@ type RawOptions struct {
 	TokenFile  string
 }
 type configuration struct {
-	Version      string   `json:"version"`
-	Repositories []string `json:"repositories"`
-	PollInterval string   `json:"pollInterval"`
+	Version         string   `json:"version"`
+	Repositories    []string `json:"repositories"`
+	PollInterval    string   `json:"pollInterval"`
+	ControllerLogin string   `json:"controllerLogin,omitempty"`
 }
 type validatedOptions struct {
 	config    configuration
@@ -61,6 +63,9 @@ func (o *RawOptions) Validate() (*ValidatedOptions, error) {
 			return nil, fmt.Errorf("invalid repository %q", repo)
 		}
 	}
+	if config.ControllerLogin == "geoberle" || config.ControllerLogin == "github-actions[bot]" {
+		return nil, fmt.Errorf("controllerLogin must be a dedicated controller identity")
+	}
 	interval, err := time.ParseDuration(config.PollInterval)
 	if err != nil || interval < time.Second {
 		return nil, fmt.Errorf("pollInterval must be at least 1s")
@@ -85,6 +90,11 @@ func (o *Options) Run(ctx context.Context, logger logr.Logger) error {
 	for {
 		if err := admission.Poll(ctx, o.client, o.config.Repositories); err != nil {
 			logger.Error(err, "Admission poll failed")
+		}
+		if len(o.config.ControllerLogin) > 0 {
+			if err := review.Poll(ctx, o.client, o.config.Repositories, o.config.ControllerLogin); err != nil {
+				logger.Error(err, "Review poll failed")
+			}
 		}
 		select {
 		case <-ctx.Done():

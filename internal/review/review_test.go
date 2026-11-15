@@ -26,7 +26,7 @@ func TestPollEmptyRepository(t *testing.T) {
 	defer server.Close()
 	client := github.NewClient(server.Client())
 	client.BaseURL, _ = url.Parse(server.URL + "/")
-	if err := review.Poll(context.Background(), client, []string{"owner/repo"}); err != nil {
+	if err := review.Poll(context.Background(), client, []string{"owner/repo"}, "controller"); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -65,7 +65,7 @@ func TestMissingEvidenceWithdrawsCompletion(t *testing.T) {
 					body = `{"workflow_runs":[{"id":10,"workflow_id":8,"path":".github/workflows/ocr.yml","event":"pull_request_target","run_attempt":2,"status":"completed","conclusion":"` + tc.conclusion + `"}]}`
 				case "/repos/owner/repo/actions/runs/10/artifacts":
 					body = `{"artifacts":[]}`
-				case "/user":
+				case "/users/controller":
 					body = `{"id":90,"login":"controller"}`
 				case "/repos/owner/repo/issues/1/comments", "/repos/owner/repo/pulls/1/comments", "/repos/owner/repo/pulls/1/reviews":
 					body = "[]"
@@ -79,7 +79,7 @@ func TestMissingEvidenceWithdrawsCompletion(t *testing.T) {
 			defer server.Close()
 			client := github.NewClient(server.Client())
 			client.BaseURL, _ = url.Parse(server.URL + "/")
-			if err := review.Poll(context.Background(), client, []string{"owner/repo"}); (err != nil) != tc.failComment {
+			if err := review.Poll(context.Background(), client, []string{"owner/repo"}, "controller"); (err != nil) != tc.failComment {
 				t.Fatalf("poll error: %v", err)
 			}
 			want := []string{"DELETE /repos/owner/repo/issues/1/labels/review-done", "POST /repos/owner/repo/issues/1/comments"}

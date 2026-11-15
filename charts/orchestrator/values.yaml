@@ -8,6 +8,8 @@ configuration:
   version: v1
   repositories: []
   pollInterval: 1m
+  # Dedicated GitHub identity; empty keeps review reconciliation disabled.
+  controllerLogin: ""
 resources:
   requests:
     cpu: 10m

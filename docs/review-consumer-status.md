@@ -1,38 +1,55 @@
-# OCR consumer implementation status
+# OCR evidence consumer
 
-The preliminary consumer in internal/review is intentionally not called by the
-runtime. Issue #5 is not complete.
+The Go runtime reconciles enrolled PRs when `configuration.controllerLogin` is
+set. An empty login keeps review reconciliation disabled for admission-only
+installations. Use a dedicated controller identity, separate from `geoberle`,
+OCR and implementation agents, with Actions read, pull requests read, and issues
+write access. The credential must publish comments as that identity. A configured
+bot login supports installation tokens without calling the user-only `/user`
+endpoint. Token issuance and renewal remain deployment responsibilities; the
+current process reads its token at startup.
 
-Implemented: direct go-github polling of enrolled PRs, trusted workflow ID/path
-and event checks, run/attempt identity artifact consumption, bounded ZIP reads,
-manifest range checks through GitHub compare merge-base, coverage partition and
-changed-file checks, severity validation, conservative human feedback blocking,
-and authored status comments.
+The consumer validates the trusted OCR workflow, PR/run/attempt identity, current
+head and merge-base range, complete changed-file coverage, findings, and successful
+publication. It does not interpret a green workflow as a clean review. Unknown
+severity, ambiguous JSON, incomplete coverage, missing/expired artifacts and
+publication failures prevent completion. File-level findings are supported;
+explicit null comments are a valid empty list in the pinned OCR contract.
 
-The workflow now uploads event identity before OCR without executing PR code.
-This identity captures the event base SHA; OCR fetches the base branch later.
-A branch movement between these operations can conservatively reject a valid
-review. Capture the actual fetched base tip in trusted metadata to close this gap.
+The workflow publishes an immutable identity artifact before OCR, then a separate
+publication artifact containing the actual reviewed merge base and the pinned
+Action's publication outputs. The consumer checks its failure count and summary
+comment against GitHub. The run name identifies the PR when GitHub omits the PR
+association on a pull_request_target run. Missing identity on an identifiable
+current-PR run blocks completion instead of falling back to an older review.
 
-Required before runtime activation:
+A controller-authored `kelos-review/v1` status comment retains the exact OCR JSON
+and repository, PR, run, attempt and head identity. Findings can be addressed by
+that identity plus their zero-based position in `result.comments`; content is
+preserved, including findings that OCR places in its summary. Transient failure
+status preserves the previous evidence block without granting it validity.
+Oversized evidence requires human attention rather than truncation. The editor
+must validate current head/run and trusted authorship before consuming it and
+persist assigned finding identities in its Kelos Task. Artifact expiration may
+block new completion even when the historical evidence remains visible.
 
-- Complete table-driven/golden HTTP coverage for valid ZIP results, latest
-  attempts, identity spoofing, stale heads, all terminal states, publication
-  failures, pagination, restart and mutation-boundary failures.
-- Make missing identity on unrelated workflow runs avoid repository-wide
-  starvation without falling back to an older review for the same PR.
-- Verify upstream publication success independently of workflow success.
-- Preserve exact artifact/run/finding references in durable editor handoff.
-- Replace conservative permanent human-feedback blocking with the approved
-  disposition contract when that consumer exists.
-- Ensure invalidation precedes status publication even if publication fails.
-- Recheck run attempt and feedback immediately before publication; define the
-  downstream requirement to revalidate durable evidence rather than trust labels.
-- Detect truncated JSON/downloads explicitly and reject duplicate JSON keys.
-- Add minimal existing-options runtime wiring after the safety tests pass.
+Invalid completion is withdrawn before fallible status writes. Before applying
+`review-done`, the consumer rechecks the latest evidence, run attempt, PR head,
+base and human feedback. Downstream assessment must validate this evidence again;
+labels alone are not authority. These checks narrow external-state races but are
+not atomic GitHub transactions.
 
-Validation so far: go test -race ./... passes; only empty-repository and
-missing-artifact withdrawal scenarios are covered for review.
-Pinned golangci-lint v2.8.0 fails under local Go 1.27.3 because its importer does
-not support export data version 5. Run it under the repository-compatible Go
-toolchain before accepting this slice. No live OCR acceptance was performed.
+Until issue #7 implements validated feedback dispositions, authorized human
+feedback remains pending conservatively. No editor or merge behavior is implied
+by this slice. Failed/partial review requires a manual workflow rerun; skipped
+review requires human approval. A new head needs fresh review.
+
+Verification: table-driven HTTP tests use real ZIP downloads and a golden status
+fixture. They cover clean/advisory completion, restart idempotency, must-fix and
+unknown severity, partial/skipped results, malformed/duplicate JSON, stale heads,
+new runs/attempts, publication failures, unrelated runs, pagination, expired
+artifacts, identity mismatch and arriving feedback. Go race tests, formatting and
+lint use `GOTOOLCHAIN=go1.25.5`.
+
+Live OCR/ARC publication, GitHub permissions, installation-token provisioning and
+cluster execution remain unverified. Issue #5 is not live-acceptance complete.

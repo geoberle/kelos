@@ -1,4 +1,5 @@
 name: OCR
+run-name: "OCR PR #${{ github.event.pull_request.number }}"
 on:
   pull_request_target:
     types: [opened, synchronize, reopened, labeled, ready_for_review]
@@ -29,7 +30,8 @@ jobs:
           path: ${{ runner.temp }}/kelos-ocr/identity.json
           if-no-files-found: error
       # The action checks out the trusted base; never check out or execute PR code here.
-      - uses: alibaba/open-code-review@7e5ce06c88de5ce81df5dc4f24e2e485b517fae8 # v1.13.10
+      - id: ocr
+        uses: alibaba/open-code-review@7e5ce06c88de5ce81df5dc4f24e2e485b517fae8 # v1.13.10
         with:
           ocr_version: '1.13.10'
           llm_url: ${{ secrets.OCR_LLM_URL }}
@@ -41,3 +43,15 @@ jobs:
           upload_artifacts: 'true'
           incremental: 'false'
           resolve_outdated: 'false'
+      - name: Record publication evidence
+        env:
+          OCR_SUMMARY: ${{ steps.ocr.outputs.summary_comment_url }}
+          OCR_TOTAL: ${{ steps.ocr.outputs.comments_total }}
+          OCR_FAILED: ${{ steps.ocr.outputs.comments_failed }}
+        run: |
+          jq --arg base "$MERGE_BASE" --arg summary "$OCR_SUMMARY" --argjson total "$OCR_TOTAL" --argjson failed "$OCR_FAILED" '. + {base: $base, summary: $summary, total: $total, failed: $failed}' "${RUNNER_TEMP}/kelos-ocr/identity.json" > "${RUNNER_TEMP}/kelos-ocr/publication.json"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: kelos-ocr-publication-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/kelos-ocr/publication.json
+          if-no-files-found: error
