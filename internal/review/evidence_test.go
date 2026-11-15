@@ -124,11 +124,13 @@ func TestVerifiedReviewEvidence(t *testing.T) {
 						_, _ = w.Write([]byte(`{"id":60,"user":{"id":91}}`))
 						return
 					}
-					_, _ = w.Write([]byte(`{"id":60,"user":{"id":90}}`))
+					_, _ = w.Write([]byte(`{"id":60,"user":{"id":90,"login":"controller"}}`))
 					return
 				}
 				var body string
 				switch r.URL.Path {
+				case "/repos/owner/repo/collaborators/geoberle/permission":
+					body = `{"role_name":"admin"}`
 				case "/repos/owner/repo/pulls":
 					body = "[" + pr() + "]"
 				case "/repos/owner/repo/pulls/1":

@@ -32,8 +32,10 @@ func TestCurrentFindingsCreateRetainedTask(t *testing.T) {
 		blocked           bool
 		completed         bool
 		fresh             bool
+		human             bool
+		laterFeedback     bool
 	}{
-		{name: "summary finding"},
+		{name: "summary finding"}, {name: "human feedback starts editor", human: true}, {name: "feedback during execution is retained", human: true, laterFeedback: true}, {name: "handled human feedback does not restart", human: true, completed: true},
 		{name: "completed attempt deduplicates", completed: true},
 		{name: "fresh attempt on same head", completed: true, fresh: true},
 		{name: "force pushes allowed", protection: `{"enforce_admins":{"enabled":true},"allow_force_pushes":{"enabled":true},"allow_deletions":{"enabled":false}}`, blocked: true},
@@ -48,12 +50,18 @@ func TestCurrentFindingsCreateRetainedTask(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			result = []byte(strings.ReplaceAll(string(result), `"comments":[]`, `"comments":[{"path":"main.go","start_line":1,"end_line":1,"content":"Fix unsafe input","severity":"high"}]`))
+			if !tc.human {
+				result = []byte(strings.ReplaceAll(string(result), `"comments":[]`, `"comments":[{"path":"main.go","start_line":1,"end_line":1,"content":"Fix unsafe input","severity":"high"}]`))
+			}
+			total := 1
+			if tc.human {
+				total = 0
+			}
 			archives := map[string][]byte{}
 			for name, body := range map[string]string{
 				"identity.json":    `{"repository":"owner/repo","pr":1,"run":10,"attempt":2,"head":"head","base":"base"}`,
 				"ocr-result.json":  string(result),
-				"publication.json": fmt.Sprintf(`{"repository":"owner/repo","pr":1,"run":10,"attempt":2,"head":"head","base":"base","summary":"https://github.com/owner/repo/issues/1#issuecomment-50","total":%d,"failed":%d}`, 1, 0),
+				"publication.json": fmt.Sprintf(`{"repository":"owner/repo","pr":1,"run":10,"attempt":2,"head":"head","base":"base","summary":"https://github.com/owner/repo/issues/1#issuecomment-50","total":%d,"failed":%d}`, total, 0),
 			} {
 				var b bytes.Buffer
 				z := zip.NewWriter(&b)
@@ -69,15 +77,28 @@ func TestCurrentFindingsCreateRetainedTask(t *testing.T) {
 				}
 				archives[name] = b.Bytes()
 			}
+			var savedComments []*github.IssueComment
 			var task map[string]any
 			creates := 0
+			humanBody := "Please fix human feedback"
+			invalidated := []string{}
 			pr := func() string {
-				return `{"number":1,"state":"open","head":{"sha":"head","ref":"agent-fix","repo":{"full_name":"owner/repo"}},"base":{"sha":"base"},"labels":[{"name":"agent-managed"}]}`
+				labels := `{"name":"agent-managed"}`
+				if tc.human && len(invalidated) == 0 {
+					labels += `,{"name":"review-done"},{"name":"lgtm"}`
+				}
+				return `{"number":1,"state":"open","head":{"sha":"head","ref":"agent-fix","repo":{"full_name":"owner/repo"}},"base":{"sha":"base"},"labels":[` + labels + `]}`
 			}
 
 			var server *httptest.Server
 			server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
+				if r.Method == "DELETE" && strings.Contains(r.URL.Path, "/labels/") {
+					invalidated = append(invalidated, r.URL.Path)
+					w.WriteHeader(204)
+					return
+				}
+
 				if r.URL.Path == "/apis/kelos.dev/v1alpha2/namespaces/agents/tasks" {
 					if r.Method == "POST" {
 						creates++
@@ -135,7 +156,27 @@ func TestCurrentFindingsCreateRetainedTask(t *testing.T) {
 					body = `{"merge_base_commit":{"sha":"base"}}`
 				case "/repos/owner/repo/pulls/1/files":
 					body = `[{"filename":"main.go"}]`
-				case "/repos/owner/repo/issues/1/comments", "/repos/owner/repo/pulls/1/reviews":
+				case "/repos/owner/repo/issues/1/comments":
+					if r.Method == "POST" {
+						var comment github.IssueComment
+						if err := json.NewDecoder(r.Body).Decode(&comment); err != nil {
+							t.Error(err)
+						}
+						comment.ID = github.Ptr(int64(90 + len(savedComments)))
+						comment.User = &github.User{Login: github.Ptr("controller")}
+						savedComments = append(savedComments, &comment)
+						_ = json.NewEncoder(w).Encode(comment)
+						return
+					}
+					comments := append([]*github.IssueComment{}, savedComments...)
+					if tc.human {
+						comments = append(comments, &github.IssueComment{ID: github.Ptr(int64(81)), Body: github.Ptr(humanBody), HTMLURL: github.Ptr("https://github.com/owner/repo/pull/1#issuecomment-81"), User: &github.User{Login: github.Ptr("geoberle")}})
+					}
+					encoded, _ := json.Marshal(comments)
+					body = string(encoded)
+				case "/repos/owner/repo/collaborators/geoberle/permission":
+					body = `{"role_name":"admin"}`
+				case "/repos/owner/repo/pulls/1/reviews":
 					body = "[]"
 					if r.Method == "POST" {
 						body = `{}`
@@ -161,6 +202,9 @@ func TestCurrentFindingsCreateRetainedTask(t *testing.T) {
 			}))
 			defer server.Close()
 			for poll := range 3 {
+				if poll == 1 && tc.laterFeedback {
+					humanBody = "Also preserve concurrent human changes"
+				}
 				if poll == 1 && tc.completed {
 					annotations := task["metadata"].(map[string]any)["annotations"].(map[string]any)
 					var assigned editor.Assignment
@@ -229,6 +273,20 @@ func TestCurrentFindingsCreateRetainedTask(t *testing.T) {
 				}
 				return
 			}
+			if tc.human && len(invalidated) != 2 {
+				t.Fatalf("stale labels not withdrawn: %v", invalidated)
+			}
+			if tc.laterFeedback {
+				found := false
+				for _, comment := range savedComments {
+					if strings.Contains(comment.GetBody(), "Also preserve concurrent human changes") {
+						found = true
+					}
+				}
+				if !found {
+					t.Fatal("feedback arriving during execution was not retained")
+				}
+			}
 			wantCreates := 1
 			if tc.fresh {
 				wantCreates = 2
@@ -252,7 +310,11 @@ func TestCurrentFindingsCreateRetainedTask(t *testing.T) {
 			if err := json.Unmarshal([]byte(annotations["orchestrator.kelos.dev/assignment"].(string)), &assignment); err != nil {
 				t.Fatal(err)
 			}
-			if len(assignment.Findings) != 1 || assignment.Findings[0].Content != "Fix unsafe input" {
+			wantContent := "Fix unsafe input"
+			if tc.human {
+				wantContent = "Please fix human feedback"
+			}
+			if len(assignment.Findings) != 1 || assignment.Findings[0].Content != wantContent {
 				t.Fatalf("incorrect findings: %+v", assignment.Findings)
 			}
 			wantID := int64(0)

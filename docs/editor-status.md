@@ -58,4 +58,5 @@ provide deduplication for Tasks created by earlier controller versions.
 Assignment, Result and Disposition are the durable JSON contract. Result.Validate
 checks complete unique accounting and explanations; consumers must additionally
 verify publication/ancestry and keep needs-human dispositions pending. Human
-feedback scheduling (#7) is not implemented here.
+feedback scheduling and validated receipt consumption are described in
+[human feedback](feedback.md).

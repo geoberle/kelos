@@ -5,7 +5,6 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -17,6 +16,8 @@ import (
 	"time"
 
 	"github.com/google/go-github/v80/github"
+
+	"github.com/geoberle/kelos/internal/feedback"
 )
 
 // Poll reconciles enrolled PRs in the explicit allowlist.
@@ -160,7 +161,7 @@ func reconcile(ctx context.Context, c *github.Client, owner, repo string, pr *gi
 		}
 		opts.Page = response.NextPage
 	}
-	blocked, err := humanFeedback(ctx, c, owner, repo, pr.GetNumber())
+	blocked, err := humanFeedback(ctx, c, owner, repo, pr, controllerLogin)
 	if err != nil {
 		return err
 	}
@@ -228,7 +229,7 @@ func reconcile(ctx context.Context, c *github.Client, owner, repo string, pr *gi
 	if current.GetHead().GetSHA() != pr.GetHead().GetSHA() || current.GetBase().GetSHA() != pr.GetBase().GetSHA() {
 		return withdraw()
 	}
-	blocked, err = humanFeedback(ctx, c, owner, repo, pr.GetNumber())
+	blocked, err = humanFeedback(ctx, c, owner, repo, pr, controllerLogin)
 	if err != nil {
 		return err
 	}
@@ -509,64 +510,9 @@ func artifact(ctx context.Context, c *github.Client, owner, repo string, run int
 	return output, nil
 }
 
-// Until issue #7 supplies validated dispositions, authorized human feedback is
-// kept pending. An approval command is handled by the merge reconciler.
-func humanFeedback(ctx context.Context, c *github.Client, owner, repo string, number int) (bool, error) {
-	opts := &github.IssueListCommentsOptions{ListOptions: github.ListOptions{PerPage: 100}}
-	for {
-		comments, res, err := c.Issues.ListComments(ctx, owner, repo, number, opts)
-		if err != nil {
-			return false, err
-		}
-		for _, v := range comments {
-			if v.GetUser().GetLogin() == "geoberle" {
-				fields := strings.Fields(v.GetBody())
-				if len(fields) == 2 && fields[0] == "reassess" && len(fields[1]) == 40 {
-					if _, err := hex.DecodeString(fields[1]); err == nil {
-						continue
-					}
-				}
-				return true, nil
-			}
-		}
-		if res.NextPage == 0 {
-			break
-		}
-		opts.Page = res.NextPage
-	}
-	ro := &github.ListOptions{PerPage: 100}
-	for {
-		reviews, res, err := c.PullRequests.ListReviews(ctx, owner, repo, number, ro)
-		if err != nil {
-			return false, err
-		}
-		for _, v := range reviews {
-			if v.GetUser().GetLogin() == "geoberle" && v.GetState() != "APPROVED" && len(v.GetBody()) > 0 {
-				return true, nil
-			}
-		}
-		if res.NextPage == 0 {
-			break
-		}
-		ro.Page = res.NextPage
-	}
-	co := &github.PullRequestListCommentsOptions{ListOptions: github.ListOptions{PerPage: 100}}
-	for {
-		comments, res, err := c.PullRequests.ListComments(ctx, owner, repo, number, co)
-		if err != nil {
-			return false, err
-		}
-		for _, v := range comments {
-			if v.GetUser().GetLogin() == "geoberle" {
-				return true, nil
-			}
-		}
-		if res.NextPage == 0 {
-			break
-		}
-		co.Page = res.NextPage
-	}
-	return false, nil
+func humanFeedback(ctx context.Context, c *github.Client, owner, repo string, pr *github.PullRequest, controller string) (bool, error) {
+	pending, err := feedback.Pending(ctx, c, owner, repo, pr.GetNumber(), pr.GetHead().GetSHA(), controller)
+	return len(pending) > 0, err
 }
 
 // OCR is model output. Reject ambiguous objects before typed decoding; Go's

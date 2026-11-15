@@ -50,6 +50,8 @@ func TestRetainedEditorsPreventNewWork(t *testing.T) {
 				switch r.URL.Path {
 				case "/repos/acme/repo/pulls":
 					_, _ = w.Write([]byte(`[{"number":1,"state":"open","labels":[{"name":"agent-managed"}],"head":{"sha":"abc"}}]`))
+				case "/repos/acme/repo/issues/1/comments", "/repos/acme/repo/pulls/1/comments", "/repos/acme/repo/pulls/1/reviews":
+					_, _ = w.Write([]byte(`[]`))
 				case "/apis/kelos.dev/v1alpha2/namespaces/agents/tasks":
 					if r.Method != "GET" {
 						t.Errorf("unexpected Task mutation %s", r.Method)
@@ -149,7 +151,7 @@ func TestEditorResultAccounting(t *testing.T) {
 					}
 					_ = json.NewEncoder(w).Encode(comments)
 				case "/repos/acme/repo/issues/1/comments":
-					if tc.inline {
+					if tc.inline && r.Method == "POST" {
 						t.Error("inline finding must receive inline reply")
 					}
 					if r.Method == "POST" {
@@ -164,6 +166,8 @@ func TestEditorResultAccounting(t *testing.T) {
 						}
 						_ = json.NewEncoder(w).Encode(comments)
 					}
+				case "/repos/acme/repo/pulls/1/reviews":
+					_, _ = w.Write([]byte(`[]`))
 				case "/repos/acme/repo/actions/workflows/ocr.yml":
 					_, _ = w.Write([]byte(`{"id":8}`))
 				case "/repos/acme/repo/actions/workflows/8/runs":

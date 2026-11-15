@@ -19,6 +19,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
 
+	"github.com/geoberle/kelos/internal/feedback"
 	"github.com/geoberle/kelos/internal/review"
 )
 
@@ -39,13 +40,7 @@ type Assignment struct {
 	Attempt    int       `json:"attempt"`
 	Findings   []Finding `json:"findings"`
 }
-type Finding struct {
-	ID              string `json:"id"`
-	Content         string `json:"content"`
-	Path            string `json:"path"`
-	Source          string `json:"source"`
-	ReviewCommentID int64  `json:"review_comment_id,omitempty"`
-}
+type Finding = feedback.Finding
 type Result struct {
 	Head         string        `json:"head"`
 	Commit       string        `json:"commit"`
@@ -124,6 +119,20 @@ func reconcile(ctx context.Context, c *github.Client, k dynamic.Interface, confi
 	if err != nil {
 		return err
 	}
+	human, err := feedback.Pending(ctx, c, owner, repo, pr.GetNumber(), pr.GetHead().GetSHA(), controllerLogin)
+	if err != nil {
+		return err
+	}
+	if len(human) > 0 {
+		for _, label := range pr.Labels {
+			if label.GetName() == "review-done" || label.GetName() == "lgtm" {
+				if _, err := c.Issues.RemoveLabelForIssue(ctx, owner, repo, pr.GetNumber(), label.GetName()); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	handled := map[string]bool{}
 	for i := range existing.Items {
 		task := &existing.Items[i]
 		phase, _, _ := unstructured.NestedString(task.Object, "status", "phase")
@@ -133,6 +142,46 @@ func reconcile(ctx context.Context, c *github.Client, k dynamic.Interface, confi
 		if err := consume(ctx, c, owner, repo, pr, task, controllerLogin); err != nil {
 			return err
 		}
+		var assignment Assignment
+		if err := json.Unmarshal([]byte(task.GetAnnotations()["orchestrator.kelos.dev/assignment"]), &assignment); err != nil {
+			return err
+		}
+		for _, f := range assignment.Findings {
+			handled[f.ID] = true
+		}
+		ids := []string{}
+		for _, f := range assignment.Findings {
+			if strings.HasPrefix(f.ID, "human/") {
+				ids = append(ids, f.ID)
+			}
+		}
+		if len(ids) > 0 {
+			var result Result
+			raw, _, _ := unstructured.NestedString(task.Object, "status", "results", "editor-result")
+			if err := json.Unmarshal([]byte(raw), &result); err != nil {
+				return err
+			}
+			if err := feedback.Record(ctx, c, owner, repo, pr.GetNumber(), result.Commit, controllerLogin, task.GetName(), ids); err != nil {
+				return err
+			}
+		}
+
+	}
+	pending := human[:0]
+	for _, f := range human {
+		if !handled[f.ID] {
+			pending = append(pending, f)
+		}
+	}
+	human = pending
+	if len(human) > 0 {
+		assignment := Assignment{Repository: owner + "/" + repo, PR: pr.GetNumber(), Head: pr.GetHead().GetSHA(), Findings: human}
+		encoded, err := json.Marshal(assignment)
+		if err != nil {
+			return err
+		}
+		name := "editor-" + key + "-" + fmt.Sprintf("%x", sha256.Sum256(encoded))[:16]
+		return create(ctx, c, k, config, owner, repo, pr, assignment, key, name)
 	}
 	raw, err := review.CurrentEvidence(ctx, c, owner, repo, pr)
 	if err != nil || len(raw) == 0 {
@@ -226,6 +275,11 @@ func reconcile(ctx context.Context, c *github.Client, k dynamic.Interface, confi
 	if len(assignment.Findings) == 0 {
 		return nil
 	}
+	return create(ctx, c, k, config, owner, repo, pr, assignment, key, name)
+}
+
+func create(ctx context.Context, c *github.Client, k dynamic.Interface, config Config, owner, repo string, pr *github.PullRequest, assignment Assignment, key, name string) error {
+	resource := k.Resource(tasks).Namespace(config.Namespace)
 	encoded, err := json.Marshal(assignment)
 	if err != nil {
 		return err
