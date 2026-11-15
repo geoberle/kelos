@@ -12,8 +12,11 @@ import (
 
 	"github.com/go-logr/logr"
 	"github.com/google/go-github/v80/github"
+	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/rest"
 
 	"github.com/geoberle/kelos/internal/admission"
+	"github.com/geoberle/kelos/internal/editor"
 	"github.com/geoberle/kelos/internal/review"
 )
 
@@ -22,10 +25,11 @@ type RawOptions struct {
 	TokenFile  string
 }
 type configuration struct {
-	Version         string   `json:"version"`
-	Repositories    []string `json:"repositories"`
-	PollInterval    string   `json:"pollInterval"`
-	ControllerLogin string   `json:"controllerLogin,omitempty"`
+	Editor          *editor.Config `json:"editor,omitempty"`
+	Version         string         `json:"version"`
+	Repositories    []string       `json:"repositories"`
+	PollInterval    string         `json:"pollInterval"`
+	ControllerLogin string         `json:"controllerLogin,omitempty"`
 }
 type validatedOptions struct {
 	config    configuration
@@ -34,9 +38,10 @@ type validatedOptions struct {
 }
 type ValidatedOptions struct{ *validatedOptions }
 type completedOptions struct {
-	config   configuration
-	interval time.Duration
-	client   *github.Client
+	config     configuration
+	interval   time.Duration
+	client     *github.Client
+	kubernetes dynamic.Interface
 }
 type Options struct{ *completedOptions }
 
@@ -66,6 +71,9 @@ func (o *RawOptions) Validate() (*ValidatedOptions, error) {
 	if config.ControllerLogin == "geoberle" || config.ControllerLogin == "github-actions[bot]" {
 		return nil, fmt.Errorf("controllerLogin must be a dedicated controller identity")
 	}
+	if config.Editor != nil && (len(config.Editor.Namespace) == 0 || len(config.Editor.Workspace) == 0 || len(config.Editor.AgentConfig) == 0 || len(config.Editor.Secret) == 0 || len(config.ControllerLogin) == 0) {
+		return nil, fmt.Errorf("editor requires namespace, workspace, agentConfig, secret and controllerLogin")
+	}
 	interval, err := time.ParseDuration(config.PollInterval)
 	if err != nil || interval < time.Second {
 		return nil, fmt.Errorf("pollInterval must be at least 1s")
@@ -82,7 +90,18 @@ func (o *ValidatedOptions) Complete() (*Options, error) {
 		return nil, fmt.Errorf("empty token file")
 	}
 	client := github.NewClient(&http.Client{Timeout: 30 * time.Second}).WithAuthToken(value)
-	return &Options{&completedOptions{config: o.config, interval: o.interval, client: client}}, nil
+	var kube dynamic.Interface
+	if o.config.Editor != nil {
+		config, err := rest.InClusterConfig()
+		if err != nil {
+			return nil, err
+		}
+		kube, err = dynamic.NewForConfig(config)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return &Options{&completedOptions{config: o.config, interval: o.interval, client: client, kubernetes: kube}}, nil
 }
 func (o *Options) Run(ctx context.Context, logger logr.Logger) error {
 	ticker := time.NewTicker(o.interval)
@@ -94,6 +113,11 @@ func (o *Options) Run(ctx context.Context, logger logr.Logger) error {
 		if len(o.config.ControllerLogin) > 0 {
 			if err := review.Poll(ctx, o.client, o.config.Repositories, o.config.ControllerLogin); err != nil {
 				logger.Error(err, "Review poll failed")
+			}
+		}
+		if o.config.Editor != nil {
+			if err := editor.Poll(ctx, o.client, o.kubernetes, o.config.Repositories, *o.config.Editor); err != nil {
+				logger.Error(err, "Editor poll failed")
 			}
 		}
 		select {
