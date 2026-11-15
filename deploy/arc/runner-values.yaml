@@ -12,7 +12,7 @@ template:
     automountServiceAccountToken: false
     containers:
       - name: runner
-        image: ghcr.io/actions/actions-runner:2.331.0
+        image: ghcr.io/actions/actions-runner:2.331.0@sha256:dced476aa42703ebd9aafc295ce52f160989c4528e831fc3be2aef83a1b3f6da
         command: ["/home/runner/run.sh"]
         resources:
           requests:

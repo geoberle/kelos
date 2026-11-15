@@ -10,8 +10,9 @@ The controller chart OCI digest is
 `sha256:3a7becceb2c8f5e400a6b828390f43d782bb8e9f58aaeade536c899570bcc572`;
 the runner chart digest is
 `sha256:39f9b61ee7e2865d7b8dd0e4e28b7c1a065765fc2ce5bf90874dd8e8be8ee2b2`.
-Runner release tag v2.331.0 exists upstream; image pull and architecture support
-remain live acceptance checks. No Docker daemon, host mounts, ingress or
+Controller and runner values pin verified OCI index digests. Both provide Linux
+amd64 and arm64 images (verified 2026-11-16); target-cluster startup remains a live
+acceptance check. No Docker daemon, host mounts, ingress or
 privileged containers are needed. Runners are ephemeral and have no mounted
 Kubernetes API token. Do not share this scale set with untrusted build jobs.
 Restrict repository workflow changes and runner access to trusted maintainers.
