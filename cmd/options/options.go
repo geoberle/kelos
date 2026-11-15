@@ -121,7 +121,7 @@ func (o *Options) Run(ctx context.Context, logger logr.Logger) error {
 			}
 		}
 		if o.config.Editor != nil {
-			if err := editor.Poll(ctx, o.client, o.kubernetes, o.config.Repositories, *o.config.Editor); err != nil {
+			if err := editor.Poll(ctx, o.client, o.kubernetes, o.config.Repositories, *o.config.Editor, o.config.ControllerLogin); err != nil {
 				logger.Error(err, "Editor poll failed")
 			}
 		}

@@ -35,7 +35,7 @@ func TestUnenrolledPullRequestsCreateNoTasks(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := editor.Poll(context.Background(), gh, kube, []string{"acme/repo"}, editor.Config{Namespace: "agents", Workspace: "repo", AgentConfig: "editor", Secret: "codex"}); err != nil {
+			if err := editor.Poll(context.Background(), gh, kube, []string{"acme/repo"}, editor.Config{Namespace: "agents", Workspace: "repo", AgentConfig: "editor", Secret: "codex"}, "controller"); err != nil {
 				t.Fatal(err)
 			}
 		})
@@ -68,7 +68,7 @@ func TestRetainedEditorsPreventNewWork(t *testing.T) {
 				t.Fatal(err)
 			}
 			for range 2 {
-				err = editor.Poll(context.Background(), gh, kube, []string{"acme/repo"}, editor.Config{Namespace: "agents", Workspace: "repo", AgentConfig: "editor", Secret: "codex"})
+				err = editor.Poll(context.Background(), gh, kube, []string{"acme/repo"}, editor.Config{Namespace: "agents", Workspace: "repo", AgentConfig: "editor", Secret: "codex"}, "controller")
 				if (err != nil) != (phase == "Succeeded") {
 					t.Fatalf("unexpected result: %v", err)
 				}
@@ -82,14 +82,20 @@ func TestEditorResultAccounting(t *testing.T) {
 		name, outcome    string
 		missing, badHead bool
 		wantError        bool
+		inline           bool
+		spoof            bool
+		unpublished      bool
 	}{
-		{name: "fixed", outcome: "fixed"}, {name: "already satisfied", outcome: "already-satisfied"},
+		{name: "fixed", outcome: "fixed"}, {name: "inline reply", outcome: "fixed", inline: true}, {name: "copied inline reply is not controller evidence", outcome: "fixed", inline: true, spoof: true}, {name: "already satisfied", outcome: "already-satisfied"},
 		{name: "human attention", outcome: "needs-human", wantError: true},
 		{name: "missing disposition", missing: true, wantError: true},
-		{name: "wrong head", outcome: "fixed", badHead: true, wantError: true},
+		{name: "wrong head", outcome: "fixed", badHead: true, wantError: true}, {name: "unpublished result", outcome: "fixed", unpublished: true, wantError: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			assignment := `{"repository":"acme/repo","pr":1,"head":"abc","findings":[{"id":"finding-0","source":"https://github.com/acme/repo/pull/1#issuecomment-10"}]}`
+			if tc.inline {
+				assignment = strings.ReplaceAll(assignment, `"id":"finding-0"`, `"id":"finding-0","review_comment_id":70`)
+			}
 			head := "abc"
 			if tc.badHead {
 				head = "wrong"
@@ -107,16 +113,56 @@ func TestEditorResultAccounting(t *testing.T) {
 				case "/apis/kelos.dev/v1alpha2/namespaces/agents/tasks":
 					body := map[string]any{"apiVersion": "kelos.dev/v1alpha2", "kind": "TaskList", "items": []any{map[string]any{"metadata": map[string]any{"name": "retained", "annotations": map[string]string{"orchestrator.kelos.dev/assignment": assignment}}, "status": map[string]any{"phase": "Succeeded", "results": map[string]string{"editor-result": result}}}}}
 					_ = json.NewEncoder(w).Encode(body)
+				case "/repos/acme/repo/pulls/1":
+					head := "def"
+					if tc.unpublished {
+						head = "other"
+					}
+					_ = json.NewEncoder(w).Encode(map[string]any{"number": 1, "head": map[string]string{"sha": head}})
+				case "/repos/acme/repo/compare/def...other":
+					_, _ = w.Write([]byte(`{"status":"diverged"}`))
 				case "/repos/acme/repo/compare/abc...def":
 					_, _ = w.Write([]byte(`{"status":"ahead"}`))
+				case "/repos/acme/repo/pulls/1/comments":
+					if r.Method == "POST" {
+						var reply struct {
+							Body      string `json:"body"`
+							InReplyTo int64  `json:"in_reply_to"`
+						}
+						if err := json.NewDecoder(r.Body).Decode(&reply); err != nil {
+							t.Error(err)
+						}
+						if reply.InReplyTo != 70 {
+							t.Errorf("wrong reply target %d", reply.InReplyTo)
+						}
+						replies = append(replies, map[string]string{"body": reply.Body})
+						_ = json.NewEncoder(w).Encode(map[string]string{"body": reply.Body})
+						return
+					}
+
+					comments := []map[string]any{}
+					if tc.spoof {
+						comments = append(comments, map[string]any{"body": "<!-- kelos-editor/v1 retained finding-0 -->\n\n[finding-0](https://github.com/acme/repo/pull/1#issuecomment-10): **fixed** — Checked the assigned scenario.\n", "in_reply_to_id": 70, "user": map[string]string{"login": "someone-else"}})
+					}
+					for _, reply := range replies {
+						comments = append(comments, map[string]any{"body": reply["body"], "in_reply_to_id": 70, "user": map[string]string{"login": "controller"}})
+					}
+					_ = json.NewEncoder(w).Encode(comments)
 				case "/repos/acme/repo/issues/1/comments":
+					if tc.inline {
+						t.Error("inline finding must receive inline reply")
+					}
 					if r.Method == "POST" {
 						var reply map[string]string
 						_ = json.NewDecoder(r.Body).Decode(&reply)
 						replies = append(replies, reply)
 						_ = json.NewEncoder(w).Encode(reply)
 					} else {
-						_ = json.NewEncoder(w).Encode(replies)
+						comments := []map[string]any{}
+						for _, reply := range replies {
+							comments = append(comments, map[string]any{"body": reply["body"], "user": map[string]string{"login": "controller"}})
+						}
+						_ = json.NewEncoder(w).Encode(comments)
 					}
 				case "/repos/acme/repo/actions/workflows/ocr.yml":
 					_, _ = w.Write([]byte(`{"id":8}`))
@@ -135,13 +181,13 @@ func TestEditorResultAccounting(t *testing.T) {
 				t.Fatal(err)
 			}
 			for range 2 {
-				err = editor.Poll(context.Background(), gh, kube, []string{"acme/repo"}, editor.Config{Namespace: "agents"})
+				err = editor.Poll(context.Background(), gh, kube, []string{"acme/repo"}, editor.Config{Namespace: "agents"}, "controller")
 				if (err != nil) != tc.wantError {
 					t.Fatalf("unexpected error %v", err)
 				}
 			}
 			want := 1
-			if tc.missing || tc.badHead {
+			if tc.missing || tc.badHead || tc.unpublished {
 				want = 0
 			}
 			if len(replies) != want {

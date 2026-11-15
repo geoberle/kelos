@@ -80,7 +80,8 @@ type publication struct {
 
 type evidence struct {
 	identity
-	Result json.RawMessage `json:"result"`
+	Summary string          `json:"summary"`
+	Result  json.RawMessage `json:"result"`
 }
 
 type result struct {
@@ -336,7 +337,7 @@ func evaluate(ctx context.Context, c *github.Client, owner, repo string, pr *git
 			if len(raw) > 48000 {
 				return outcome{Reason: "Review evidence exceeds durable comment capacity; human attention required."}, nil
 			}
-			retained := &evidence{identity: id, Result: json.RawMessage(raw)}
+			retained := &evidence{identity: id, Summary: pub.Summary, Result: json.RawMessage(raw)}
 			cov := m.Coverage
 			if cov.Selected == nil || cov.Completed == nil || cov.Reused == nil || cov.Failed == nil || cov.Waived == nil || cov.Excluded == nil || len(cov.Selected) == 0 || len(cov.Failed)+len(cov.Waived)+len(cov.Excluded) > 0 {
 				return outcome{Reason: "Coverage incomplete or excluded; human attention required."}, nil

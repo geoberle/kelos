@@ -7,6 +7,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
+	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/google/go-github/v80/github"
@@ -37,10 +40,11 @@ type Assignment struct {
 	Findings   []Finding `json:"findings"`
 }
 type Finding struct {
-	ID      string `json:"id"`
-	Content string `json:"content"`
-	Path    string `json:"path"`
-	Source  string `json:"source"`
+	ID              string `json:"id"`
+	Content         string `json:"content"`
+	Path            string `json:"path"`
+	Source          string `json:"source"`
+	ReviewCommentID int64  `json:"review_comment_id,omitempty"`
 }
 type Result struct {
 	Head         string        `json:"head"`
@@ -53,7 +57,7 @@ type Disposition struct {
 	Explanation string `json:"explanation"`
 }
 
-func Poll(ctx context.Context, c *github.Client, k dynamic.Interface, repositories []string, config Config) error {
+func Poll(ctx context.Context, c *github.Client, k dynamic.Interface, repositories []string, config Config, controllerLogin string) error {
 	var failures []error
 	for _, repository := range repositories {
 		owner, repo, _ := strings.Cut(repository, "/")
@@ -74,7 +78,7 @@ func Poll(ctx context.Context, c *github.Client, k dynamic.Interface, repositori
 				if !enrolled {
 					continue
 				}
-				if err := reconcile(ctx, c, k, config, owner, repo, pr); err != nil {
+				if err := reconcile(ctx, c, k, config, owner, repo, pr, controllerLogin); err != nil {
 					failures = append(failures, fmt.Errorf("%s#%d: %w", repository, pr.GetNumber(), err))
 				}
 			}
@@ -87,7 +91,7 @@ func Poll(ctx context.Context, c *github.Client, k dynamic.Interface, repositori
 	return errors.Join(failures...)
 }
 
-func reconcile(ctx context.Context, c *github.Client, k dynamic.Interface, config Config, owner, repo string, pr *github.PullRequest) error {
+func reconcile(ctx context.Context, c *github.Client, k dynamic.Interface, config Config, owner, repo string, pr *github.PullRequest, controllerLogin string) error {
 	resource := k.Resource(tasks).Namespace(config.Namespace)
 	key := fmt.Sprintf("%x", sha256.Sum256([]byte(fmt.Sprintf("%s/%s#%d", owner, repo, pr.GetNumber()))))[:32]
 	name := "editor-" + key + "-" + fmt.Sprintf("%x", sha256.Sum256([]byte(pr.GetHead().GetSHA())))[:16]
@@ -101,7 +105,7 @@ func reconcile(ctx context.Context, c *github.Client, k dynamic.Interface, confi
 		if phase != "Succeeded" {
 			return nil
 		}
-		if err := consume(ctx, c, owner, repo, pr, task); err != nil {
+		if err := consume(ctx, c, owner, repo, pr, task, controllerLogin); err != nil {
 			return err
 		}
 		if task.GetName() == name {
@@ -118,39 +122,74 @@ func reconcile(ctx context.Context, c *github.Client, k dynamic.Interface, confi
 		Head       string `json:"head"`
 		Run        int64  `json:"run"`
 		Attempt    int    `json:"attempt"`
+		Summary    string `json:"summary"`
 		Result     struct {
-			Comments []struct{ Content, Path, Severity string } `json:"comments"`
+			Comments []struct {
+				Content, Path, Severity string
+				Start                   int `json:"start_line"`
+				End                     int `json:"end_line"`
+			} `json:"comments"`
 		} `json:"result"`
 	}
 	if err := json.Unmarshal(raw, &evidence); err != nil {
 		return err
 	}
-	source := ""
-	commentOptions := &github.IssueListCommentsOptions{ListOptions: github.ListOptions{PerPage: 100}}
+	summaryID, err := summaryCommentID(evidence.Summary, owner, repo, pr.GetNumber())
+	if err != nil {
+		return err
+	}
+	summary, _, err := c.Issues.GetComment(ctx, owner, repo, summaryID)
+	if err != nil {
+		return err
+	}
+	if summary.GetUser().GetLogin() != "github-actions[bot]" || !strings.HasPrefix(summary.GetBody(), "<!-- ocr-summary -->") {
+		return fmt.Errorf("untrusted OCR summary")
+	}
+	inline := []*github.PullRequestComment{}
+	opts := &github.PullRequestListCommentsOptions{ListOptions: github.ListOptions{PerPage: 100}}
 	for {
-		comments, response, err := c.Issues.ListComments(ctx, owner, repo, pr.GetNumber(), commentOptions)
+		page, res, err := c.PullRequests.ListComments(ctx, owner, repo, pr.GetNumber(), opts)
 		if err != nil {
 			return err
 		}
-		for _, comment := range comments {
-			if comment.GetUser().GetLogin() == "github-actions[bot]" && strings.HasPrefix(comment.GetBody(), "<!-- ocr-summary -->") {
-				source = comment.GetHTMLURL()
-			}
-		}
-		if response.NextPage == 0 {
+		inline = append(inline, page...)
+		if res.NextPage == 0 {
 			break
 		}
-		commentOptions.Page = response.NextPage
-	}
-	if len(source) == 0 {
-		return fmt.Errorf("missing original OCR summary")
+		opts.Page = res.NextPage
 	}
 	assignment := Assignment{Repository: evidence.Repository, PR: evidence.PR, Head: evidence.Head, Run: evidence.Run, Attempt: evidence.Attempt}
 	for index, f := range evidence.Result.Comments {
 		if f.Severity != "critical" && f.Severity != "high" {
 			continue
 		}
-		assignment.Findings = append(assignment.Findings, Finding{ID: fmt.Sprintf("%s/%d/%d/%d/%s/%d", evidence.Repository, evidence.PR, evidence.Run, evidence.Attempt, evidence.Head, index), Content: f.Content, Path: f.Path, Source: source})
+		finding := Finding{ID: fmt.Sprintf("%s/%d/%d/%d/%s/%d", evidence.Repository, evidence.PR, evidence.Run, evidence.Attempt, evidence.Head, index), Content: f.Content, Path: f.Path, Source: evidence.Summary}
+		marker := regexp.MustCompile(fmt.Sprintf(`^<!-- ocr-%d-%d-[0-9a-f]{16} -->`, evidence.Run, evidence.Attempt))
+		for _, comment := range inline {
+			if comment.GetUser().GetLogin() != "github-actions[bot]" || comment.GetInReplyTo() != 0 || comment.GetOriginalCommitID() != evidence.Head || comment.GetPath() != f.Path || !marker.MatchString(comment.GetBody()) || !strings.Contains(comment.GetBody(), f.Content) {
+				continue
+			}
+			line := comment.GetOriginalLine()
+			if line == 0 {
+				line = comment.GetLine()
+			}
+			start := comment.GetOriginalStartLine()
+			if start == 0 {
+				start = line
+			}
+			if line != f.End || start != f.Start {
+				continue
+			}
+			if finding.ReviewCommentID != 0 {
+				return fmt.Errorf("ambiguous inline finding correlation")
+			}
+			finding.ReviewCommentID = comment.GetID()
+			finding.Source = comment.GetHTMLURL()
+		}
+		if finding.ReviewCommentID == 0 && !strings.Contains(summary.GetBody(), f.Content) {
+			return fmt.Errorf("finding missing from published OCR feedback")
+		}
+		assignment.Findings = append(assignment.Findings, finding)
 	}
 	if len(assignment.Findings) == 0 {
 		return nil
@@ -163,13 +202,18 @@ func reconcile(ctx context.Context, c *github.Client, k dynamic.Interface, confi
 	if err != nil {
 		return err
 	}
+	if len(current.GetHead().GetRef()) == 0 || current.GetHead().GetRepo().GetFullName() != assignment.Repository {
+		return fmt.Errorf("editor requires a branch in the managed repository")
+	}
 	if current.GetHead().GetSHA() != assignment.Head {
 		return nil
 	}
 	task := &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": "kelos.dev/v1alpha2", "kind": "Task",
 		"metadata": map[string]any{"name": name, "namespace": config.Namespace, "labels": map[string]any{"orchestrator.kelos.dev/pr": key}, "annotations": map[string]any{"orchestrator.kelos.dev/assignment": string(encoded)}},
-		"spec":     map[string]any{"type": "codex", "credentials": map[string]any{"type": "oauth", "secretRef": map[string]any{"name": config.Secret}}, "workspaceRef": map[string]any{"name": config.Workspace}, "agentConfigRefs": []any{map[string]any{"name": config.AgentConfig}}, "branch": current.GetHead().GetRef(), "upstreamRepo": assignment.Repository, "prompt": prompt + string(encoded)},
+		"spec": map[string]any{
+			"worker": map[string]any{"type": "codex", "credentials": map[string]any{"type": "api-key", "secretRef": map[string]any{"name": config.Secret}}, "workspaceRef": map[string]any{"name": config.Workspace}, "agentConfigRefs": []any{map[string]any{"name": config.AgentConfig}}},
+			"branch": current.GetHead().GetRef(), "upstreamRepo": assignment.Repository, "prompt": prompt + string(encoded)},
 	}}
 	_, err = resource.Create(ctx, task, metav1.CreateOptions{})
 	if apierrors.IsAlreadyExists(err) {
@@ -188,7 +232,7 @@ editor-result: {"head":"<assigned head>","commit":"<result commit>","disposition
 Assignment:
 `
 
-func consume(ctx context.Context, c *github.Client, owner, repo string, pr *github.PullRequest, task *unstructured.Unstructured) error {
+func consume(ctx context.Context, c *github.Client, owner, repo string, pr *github.PullRequest, task *unstructured.Unstructured, controllerLogin string) error {
 	phase, _, _ := unstructured.NestedString(task.Object, "status", "phase")
 	if phase != "Succeeded" {
 		return nil
@@ -215,9 +259,22 @@ func consume(ctx context.Context, c *github.Client, owner, repo string, pr *gith
 	if comparison.GetStatus() != "ahead" && comparison.GetStatus() != "identical" {
 		return fmt.Errorf("editor result is not based on assigned head")
 	}
+	current, _, err := c.PullRequests.Get(ctx, owner, repo, pr.GetNumber())
+	if err != nil {
+		return err
+	}
+	if current.GetHead().GetSHA() != result.Commit {
+		comparison, _, err := c.Repositories.CompareCommits(ctx, owner, repo, result.Commit, current.GetHead().GetSHA(), nil)
+		if err != nil {
+			return err
+		}
+		if comparison.GetStatus() != "ahead" {
+			return fmt.Errorf("editor result is not on the current PR branch")
+		}
+	}
 	dispositions := map[string]Disposition{}
 	for _, d := range result.Dispositions {
-		if len(d.Explanation) == 0 || len(dispositions[d.ID].ID) > 0 || (d.Outcome != "fixed" && d.Outcome != "already-satisfied" && d.Outcome != "needs-human") {
+		if len(strings.TrimSpace(d.Explanation)) == 0 || len(dispositions[d.ID].ID) > 0 || (d.Outcome != "fixed" && d.Outcome != "already-satisfied" && d.Outcome != "needs-human") {
 			return fmt.Errorf("invalid editor disposition")
 		}
 		dispositions[d.ID] = d
@@ -227,6 +284,7 @@ func consume(ctx context.Context, c *github.Client, owner, repo string, pr *gith
 	}
 	pending := false
 	body := "<!-- kelos-editor/v1 " + task.GetName() + " -->\n"
+	summaryFindings := false
 	for _, f := range assignment.Findings {
 		d, ok := dispositions[f.ID]
 		if d.Outcome == "needs-human" {
@@ -235,7 +293,41 @@ func consume(ctx context.Context, c *github.Client, owner, repo string, pr *gith
 		if !ok {
 			return fmt.Errorf("missing editor disposition")
 		}
-		body += fmt.Sprintf("\n[%s](%s): **%s** — %s\n", f.ID, f.Source, d.Outcome, d.Explanation)
+		explanation := fmt.Sprintf("\n[%s](%s): **%s** — %s\n", f.ID, f.Source, d.Outcome, d.Explanation)
+		if f.ReviewCommentID != 0 {
+			reply := "<!-- kelos-editor/v1 " + task.GetName() + " " + f.ID + " -->\n" + explanation
+			found := false
+			opts := &github.PullRequestListCommentsOptions{ListOptions: github.ListOptions{PerPage: 100}}
+			for {
+				comments, response, err := c.PullRequests.ListComments(ctx, owner, repo, pr.GetNumber(), opts)
+				if err != nil {
+					return err
+				}
+				for _, comment := range comments {
+					if comment.GetUser().GetLogin() == controllerLogin && comment.GetInReplyTo() == f.ReviewCommentID && comment.GetBody() == reply {
+						found = true
+					}
+				}
+				if response.NextPage == 0 {
+					break
+				}
+				opts.Page = response.NextPage
+			}
+			if !found {
+				if _, _, err := c.PullRequests.CreateCommentInReplyTo(ctx, owner, repo, pr.GetNumber(), reply, f.ReviewCommentID); err != nil {
+					return err
+				}
+			}
+		} else {
+			summaryFindings = true
+			body += explanation
+		}
+	}
+	if !summaryFindings {
+		if pending {
+			return fmt.Errorf("editor requires human attention")
+		}
+		return nil
 	}
 	opts := &github.IssueListCommentsOptions{ListOptions: github.ListOptions{PerPage: 100}}
 	for {
@@ -244,7 +336,7 @@ func consume(ctx context.Context, c *github.Client, owner, repo string, pr *gith
 			return err
 		}
 		for _, comment := range comments {
-			if comment.GetBody() == body {
+			if comment.GetUser().GetLogin() == controllerLogin && comment.GetBody() == body {
 				if pending {
 					return fmt.Errorf("editor requires human attention")
 				}
@@ -261,4 +353,19 @@ func consume(ctx context.Context, c *github.Client, owner, repo string, pr *gith
 		return fmt.Errorf("editor requires human attention")
 	}
 	return err
+}
+
+func summaryCommentID(source, owner, repo string, number int) (int64, error) {
+	u, err := url.Parse(source)
+	if err != nil {
+		return 0, err
+	}
+	if u.Scheme != "https" || u.Host != "github.com" || (u.Path != fmt.Sprintf("/%s/%s/pull/%d", owner, repo, number) && u.Path != fmt.Sprintf("/%s/%s/issues/%d", owner, repo, number)) || !strings.HasPrefix(u.Fragment, "issuecomment-") {
+		return 0, fmt.Errorf("invalid OCR summary URL")
+	}
+	id, err := strconv.ParseInt(strings.TrimPrefix(u.Fragment, "issuecomment-"), 10, 64)
+	if err != nil || id <= 0 {
+		return 0, fmt.Errorf("invalid OCR summary identity")
+	}
+	return id, nil
 }
