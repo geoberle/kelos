@@ -17,6 +17,17 @@ jobs:
     runs-on: kelos-ocr
     timeout-minutes: 45
     steps:
+      - name: Record trusted event identity
+        env:
+          EVENT_JSON: ${{ toJSON(github.event) }}
+        run: |
+          mkdir -p "${RUNNER_TEMP}/kelos-ocr"
+          jq --arg repository "$GITHUB_REPOSITORY" --argjson run "$GITHUB_RUN_ID" --argjson attempt "$GITHUB_RUN_ATTEMPT" '{repository: $repository, run: $run, attempt: $attempt, pr: .pull_request.number, head: .pull_request.head.sha, base: .pull_request.base.sha}' <<< "$EVENT_JSON" > "${RUNNER_TEMP}/kelos-ocr/identity.json"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: kelos-ocr-identity-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/kelos-ocr/identity.json
+          if-no-files-found: error
       # The action checks out the trusted base; never check out or execute PR code here.
       - uses: alibaba/open-code-review@7e5ce06c88de5ce81df5dc4f24e2e485b517fae8 # v1.13.10
         with:
