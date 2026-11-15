@@ -88,16 +88,34 @@ type result struct {
 	} `json:"manifest"`
 }
 
-func reconcile(ctx context.Context, c *github.Client, owner, repo string, pr *github.PullRequest) error {
-	reason, err := evaluate(ctx, c, owner, repo, pr)
-	if err != nil {
-		if label(pr, "review-done") {
-			_, removeErr := c.Issues.RemoveLabelForIssue(ctx, owner, repo, pr.GetNumber(), "review-done")
-			return errors.Join(err, removeErr)
+func reconcile(ctx context.Context, c *github.Client, owner, repo string, pr *github.PullRequest) (reconcileErr error) {
+	withdrawn := !label(pr, "review-done")
+	withdraw := func() error {
+		if withdrawn {
+			return nil
+		}
+		_, err := c.Issues.RemoveLabelForIssue(ctx, owner, repo, pr.GetNumber(), "review-done")
+		if err == nil {
+			withdrawn = true
 		}
 		return err
 	}
-	body := fmt.Sprintf("<!-- kelos-review/v1 -->\nHead: %s\n%s", pr.GetHead().GetSHA(), reason)
+	// Any failed validation or mutation withdraws previously published completion.
+	defer func() {
+		if reconcileErr != nil {
+			reconcileErr = errors.Join(reconcileErr, withdraw())
+		}
+	}()
+	decision, err := evaluate(ctx, c, owner, repo, pr)
+	if err != nil {
+		return err
+	}
+	if !decision.Complete {
+		if err := withdraw(); err != nil {
+			return err
+		}
+	}
+	body := fmt.Sprintf("<!-- kelos-review/v1 -->\nHead: %s\n%s", pr.GetHead().GetSHA(), decision.Reason)
 	// Use authenticated author identity, never trust a marker supplied by a PR author.
 	user, _, err := c.Users.Get(ctx, "")
 	if err != nil {
@@ -116,8 +134,8 @@ func reconcile(ctx context.Context, c *github.Client, owner, repo string, pr *gi
 			}
 			// Until feedback dispositions are delivered, preserve human input conservatively.
 			if comment.GetUser().GetLogin() == "geoberle" {
-				reason = "Human feedback requires disposition."
-				body = fmt.Sprintf("<!-- kelos-review/v1 -->\nHead: %s\n%s", pr.GetHead().GetSHA(), reason)
+				decision = outcome{Reason: "Human feedback requires disposition."}
+				body = fmt.Sprintf("<!-- kelos-review/v1 -->\nHead: %s\n%s", pr.GetHead().GetSHA(), decision.Reason)
 			}
 		}
 		if response.NextPage == 0 {
@@ -133,7 +151,7 @@ func reconcile(ctx context.Context, c *github.Client, owner, repo string, pr *gi
 		}
 		for _, r := range reviews {
 			if r.GetUser().GetLogin() == "geoberle" && r.GetState() != "APPROVED" {
-				reason = "Human feedback requires disposition."
+				decision = outcome{Reason: "Human feedback requires disposition."}
 			}
 		}
 		if response.NextPage == 0 {
@@ -149,7 +167,7 @@ func reconcile(ctx context.Context, c *github.Client, owner, repo string, pr *gi
 		}
 		for _, r := range comments {
 			if r.GetUser().GetLogin() == "geoberle" {
-				reason = "Human feedback requires disposition."
+				decision = outcome{Reason: "Human feedback requires disposition."}
 			}
 		}
 		if response.NextPage == 0 {
@@ -157,7 +175,12 @@ func reconcile(ctx context.Context, c *github.Client, owner, repo string, pr *gi
 		}
 		commentOptions.Page = response.NextPage
 	}
-	body = fmt.Sprintf("<!-- kelos-review/v1 -->\nHead: %s\n%s", pr.GetHead().GetSHA(), reason)
+	body = fmt.Sprintf("<!-- kelos-review/v1 -->\nHead: %s\n%s", pr.GetHead().GetSHA(), decision.Reason)
+	if !decision.Complete {
+		if err := withdraw(); err != nil {
+			return err
+		}
+	}
 	if existing == nil {
 		_, _, err = c.Issues.CreateComment(ctx, owner, repo, pr.GetNumber(), &github.IssueComment{Body: &body})
 	} else if existing.GetBody() != body {
@@ -166,19 +189,15 @@ func reconcile(ctx context.Context, c *github.Client, owner, repo string, pr *gi
 	if err != nil {
 		return err
 	}
-	if reason != "Complete current review; no must-fix findings." {
-		if label(pr, "review-done") {
-			_, err = c.Issues.RemoveLabelForIssue(ctx, owner, repo, pr.GetNumber(), "review-done")
-			return err
-		}
+	if !decision.Complete {
 		return nil
 	}
 	current, _, err := c.PullRequests.Get(ctx, owner, repo, pr.GetNumber())
 	if err != nil {
 		return err
 	}
-	if current.GetHead().GetSHA() != pr.GetHead().GetSHA() {
-		return nil
+	if current.GetHead().GetSHA() != pr.GetHead().GetSHA() || current.GetBase().GetSHA() != pr.GetBase().GetSHA() {
+		return withdraw()
 	}
 	if label(current, "review-done") {
 		return nil
@@ -187,16 +206,21 @@ func reconcile(ctx context.Context, c *github.Client, owner, repo string, pr *gi
 	return err
 }
 
-func evaluate(ctx context.Context, c *github.Client, owner, repo string, pr *github.PullRequest) (string, error) {
+type outcome struct {
+	Reason   string
+	Complete bool
+}
+
+func evaluate(ctx context.Context, c *github.Client, owner, repo string, pr *github.PullRequest) (outcome, error) {
 	workflow, _, err := c.Actions.GetWorkflowByFileName(ctx, owner, repo, "ocr.yml")
 	if err != nil {
-		return "", err
+		return outcome{Reason: ""}, err
 	}
 	opts := &github.ListWorkflowRunsOptions{ListOptions: github.ListOptions{PerPage: 100}}
 	for {
 		runs, response, err := c.Actions.ListWorkflowRunsByID(ctx, owner, repo, workflow.GetID(), opts)
 		if err != nil {
-			return "", err
+			return outcome{Reason: ""}, err
 		}
 		for _, run := range runs.WorkflowRuns {
 			if run.GetEvent() != "pull_request_target" || run.GetWorkflowID() != workflow.GetID() || run.GetPath() != ".github/workflows/ocr.yml" {
@@ -204,56 +228,56 @@ func evaluate(ctx context.Context, c *github.Client, owner, repo string, pr *git
 			}
 			data, err := artifact(ctx, c, owner, repo, run.GetID(), fmt.Sprintf("kelos-ocr-identity-%d-%d", run.GetID(), run.GetRunAttempt()), "identity.json")
 			if err != nil {
-				return "Missing trusted correlation evidence; manual rerun required.", nil
+				return outcome{Reason: "Missing trusted correlation evidence; manual rerun required."}, nil
 			}
 			var id identity
 			if json.Unmarshal(data, &id) != nil || id.Repository != owner+"/"+repo || id.Run != run.GetID() || id.Attempt != run.GetRunAttempt() {
-				return "Malformed correlation evidence; manual rerun required.", nil
+				return outcome{Reason: "Malformed correlation evidence; manual rerun required."}, nil
 			}
 			if id.PR != pr.GetNumber() {
 				continue
 			}
 			if id.Head != pr.GetHead().GetSHA() {
-				return "Waiting for review of current head.", nil
+				return outcome{Reason: "Waiting for review of current head."}, nil
 			}
 			if run.GetStatus() != "completed" || run.GetConclusion() != "success" {
-				return "Review unfinished or publication failed; manual rerun required.", nil
+				return outcome{Reason: "Review unfinished or publication failed; manual rerun required."}, nil
 			}
 			raw, err := artifact(ctx, c, owner, repo, run.GetID(), fmt.Sprintf("ocr-review-result-%d-%d", run.GetID(), run.GetRunAttempt()), "ocr-result.json")
 			if err != nil {
-				return "Missing review artifact; manual rerun required.", nil
+				return outcome{Reason: "Missing review artifact; manual rerun required."}, nil
 			}
 			var r result
 			if json.Unmarshal(raw, &r) != nil {
-				return "Malformed review artifact; manual rerun required.", nil
+				return outcome{Reason: "Malformed review artifact; manual rerun required."}, nil
 			}
 			m := r.Manifest
 			if m.Schema != "ocr.run-manifest/v1" || m.Operation != "review" || m.Input.Mode != "range" || m.Input.Head != id.Head || len(id.Base) == 0 {
-				return "Invalid review identity; manual rerun required.", nil
+				return outcome{Reason: "Invalid review identity; manual rerun required."}, nil
 			}
 			comparison, _, err := c.Repositories.CompareCommits(ctx, owner, repo, id.Base, id.Head, nil)
 			if err != nil {
-				return "", err
+				return outcome{Reason: ""}, err
 			}
 			if m.Input.Base != comparison.GetMergeBaseCommit().GetSHA() {
-				return "Reviewed range mismatch; manual rerun required.", nil
+				return outcome{Reason: "Reviewed range mismatch; manual rerun required."}, nil
 			}
 			if m.State == "skipped" {
-				return "Review skipped; human LGTM required.", nil
+				return outcome{Reason: "Review skipped; human LGTM required."}, nil
 			}
 			if m.State != "complete" || (len(m.Failure) > 0 && string(m.Failure) != "null") {
-				return "Review incomplete; manual rerun required.", nil
+				return outcome{Reason: "Review incomplete; manual rerun required."}, nil
 			}
 			cov := m.Coverage
 			if cov.Selected == nil || cov.Completed == nil || cov.Reused == nil || cov.Failed == nil || cov.Waived == nil || cov.Excluded == nil || len(cov.Selected) == 0 || len(cov.Failed)+len(cov.Waived)+len(cov.Excluded) > 0 {
-				return "Coverage incomplete or excluded; human attention required.", nil
+				return outcome{Reason: "Coverage incomplete or excluded; human attention required."}, nil
 			}
 			currentRange, _, err := c.Repositories.CompareCommits(ctx, owner, repo, pr.GetBase().GetSHA(), id.Head, nil)
 			if err != nil {
-				return "", err
+				return outcome{Reason: ""}, err
 			}
 			if currentRange.GetMergeBaseCommit().GetSHA() != m.Input.Base {
-				return "Review range is stale.", nil
+				return outcome{Reason: "Review range is stale."}, nil
 			}
 			paths := map[string]bool{}
 			for _, i := range cov.Selected {
@@ -264,12 +288,12 @@ func evaluate(ctx context.Context, c *github.Client, owner, repo string, pr *git
 			for {
 				files, response, err := c.PullRequests.ListFiles(ctx, owner, repo, pr.GetNumber(), fileOptions)
 				if err != nil {
-					return "", err
+					return outcome{Reason: ""}, err
 				}
 				for _, file := range files {
 					fileCount++
 					if !paths[file.GetFilename()] {
-						return "Changed file omitted from review coverage.", nil
+						return outcome{Reason: "Changed file omitted from review coverage."}, nil
 					}
 					delete(paths, file.GetFilename())
 				}
@@ -279,48 +303,48 @@ func evaluate(ctx context.Context, c *github.Client, owner, repo string, pr *git
 				fileOptions.Page = response.NextPage
 			}
 			if len(paths) > 0 || fileCount >= 3000 {
-				return "Coverage cannot be verified.", nil
+				return outcome{Reason: "Coverage cannot be verified."}, nil
 			}
 			selected := map[string]string{}
 			for _, i := range cov.Selected {
 				if len(i.ID) == 0 || len(i.Path) == 0 || len(selected[i.ID]) > 0 {
-					return "Malformed coverage.", nil
+					return outcome{Reason: "Malformed coverage."}, nil
 				}
 				selected[i.ID] = i.Path
 			}
 			for _, i := range append(cov.Completed, cov.Reused...) {
 				if selected[i.ID] != i.Path || len(i.Path) == 0 {
-					return "Malformed coverage.", nil
+					return outcome{Reason: "Malformed coverage."}, nil
 				}
 				delete(selected, i.ID)
 			}
 			if len(selected) > 0 {
-				return "Incomplete coverage.", nil
+				return outcome{Reason: "Incomplete coverage."}, nil
 			}
 			mustFix := false
 			for _, finding := range r.Comments {
 				if len(finding.Path) == 0 || len(finding.Content) == 0 || finding.Start < 1 || finding.End < finding.Start {
-					return "Malformed finding.", nil
+					return outcome{Reason: "Malformed finding."}, nil
 				}
 				switch finding.Severity {
 				case "critical", "high":
 					mustFix = true
 				case "medium", "low":
 				default:
-					return "Unknown finding severity.", nil
+					return outcome{Reason: "Unknown finding severity."}, nil
 				}
 			}
 			if mustFix {
-				return "Must-fix findings remain; retained in the workflow artifact for editing.", nil
+				return outcome{Reason: "Must-fix findings remain; retained in the workflow artifact for editing."}, nil
 			}
-			return "Complete current review; no must-fix findings.", nil
+			return outcome{Reason: "Complete current review; no must-fix findings.", Complete: true}, nil
 		}
 		if response.NextPage == 0 {
 			break
 		}
 		opts.Page = response.NextPage
 	}
-	return "Waiting for trusted OCR evidence.", nil
+	return outcome{Reason: "Waiting for trusted OCR evidence."}, nil
 }
 
 func artifact(ctx context.Context, c *github.Client, owner, repo string, run int64, name, file string) ([]byte, error) {
@@ -359,13 +383,16 @@ func artifact(ctx context.Context, c *github.Client, owner, repo string, run int
 	if err != nil {
 		return nil, err
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	if response.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("artifact download: %d", response.StatusCode)
 	}
-	data, err := io.ReadAll(io.LimitReader(response.Body, 16<<20))
+	data, err := io.ReadAll(io.LimitReader(response.Body, (16<<20)+1))
 	if err != nil {
 		return nil, err
+	}
+	if len(data) > 16<<20 {
+		return nil, fmt.Errorf("artifact exceeds download limit")
 	}
 	archive, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
 	if err != nil {
@@ -383,10 +410,13 @@ func artifact(ctx context.Context, c *github.Client, owner, repo string, run int
 		if err != nil {
 			return nil, err
 		}
-		output, err = io.ReadAll(io.LimitReader(reader, 8<<20))
+		output, err = io.ReadAll(io.LimitReader(reader, (8<<20)+1))
 		closeErr := reader.Close()
 		if err != nil {
 			return nil, err
+		}
+		if len(output) > 8<<20 {
+			return nil, fmt.Errorf("artifact file exceeds limit")
 		}
 		if closeErr != nil {
 			return nil, closeErr

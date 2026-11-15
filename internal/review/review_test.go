@@ -32,8 +32,11 @@ func TestPollEmptyRepository(t *testing.T) {
 }
 
 func TestMissingEvidenceWithdrawsCompletion(t *testing.T) {
-	for _, tc := range []struct{ name, conclusion string }{
-		{"missing artifact", "success"}, {"failed publication", "failure"},
+	for _, tc := range []struct {
+		name, conclusion string
+		failComment      bool
+	}{
+		{"missing artifact", "success", false}, {"failed publication", "failure", false}, {"status publication failure", "success", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var mutations []string
@@ -43,6 +46,10 @@ func TestMissingEvidenceWithdrawsCompletion(t *testing.T) {
 					mutations = append(mutations, r.Method+" "+r.URL.Path)
 					if r.Method == "DELETE" {
 						w.WriteHeader(204)
+						return
+					}
+					if tc.failComment {
+						http.Error(w, "unavailable", http.StatusServiceUnavailable)
 						return
 					}
 					_, _ = w.Write([]byte("{}"))
@@ -72,10 +79,10 @@ func TestMissingEvidenceWithdrawsCompletion(t *testing.T) {
 			defer server.Close()
 			client := github.NewClient(server.Client())
 			client.BaseURL, _ = url.Parse(server.URL + "/")
-			if err := review.Poll(context.Background(), client, []string{"owner/repo"}); err != nil {
-				t.Fatal(err)
+			if err := review.Poll(context.Background(), client, []string{"owner/repo"}); (err != nil) != tc.failComment {
+				t.Fatalf("poll error: %v", err)
 			}
-			want := []string{"POST /repos/owner/repo/issues/1/comments", "DELETE /repos/owner/repo/issues/1/labels/review-done"}
+			want := []string{"DELETE /repos/owner/repo/issues/1/labels/review-done", "POST /repos/owner/repo/issues/1/comments"}
 			if !reflect.DeepEqual(mutations, want) {
 				t.Fatalf("mutations: %v, want %v", mutations, want)
 			}
