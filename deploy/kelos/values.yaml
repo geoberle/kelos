@@ -1,0 +1,25 @@
+# External chart source: kelos-dev/kelos@0f7b318ab66eee7f22079dbf0796dcb384ca9698
+crds:
+  install: true
+  keep: true
+# Supply a verified immutable release tag at render/install time. No latest fallback.
+image:
+  tag: RELEASE_PIN_REQUIRED
+telemetry:
+  enabled: false
+controller:
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: '1'
+      memory: 512Mi
+spawner:
+  resources:
+    requests: cpu=100m,memory=128Mi
+    limits: cpu=500m,memory=256Mi
+consoleServer:
+  enabled: false
+slackServer:
+  enabled: false
