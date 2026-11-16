@@ -45,12 +45,23 @@ func TestUnenrolledPullRequestsCreateNoTasks(t *testing.T) {
 func TestRetainedEditorsPreventNewWork(t *testing.T) {
 	for _, phase := range []string{"Pending", "Running", "Failed", "Waiting", "Succeeded"} {
 		t.Run(phase, func(t *testing.T) {
+			var statuses []map[string]any
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
 				switch r.URL.Path {
 				case "/repos/acme/repo/pulls":
 					_, _ = w.Write([]byte(`[{"number":1,"state":"open","labels":[{"name":"agent-managed"}],"head":{"sha":"abc"}}]`))
-				case "/repos/acme/repo/issues/1/comments", "/repos/acme/repo/pulls/1/comments", "/repos/acme/repo/pulls/1/reviews":
+				case "/repos/acme/repo/issues/1/comments":
+					if r.Method == "POST" {
+						var status map[string]any
+						_ = json.NewDecoder(r.Body).Decode(&status)
+						status["user"] = map[string]string{"login": "controller"}
+						statuses = append(statuses, status)
+						_ = json.NewEncoder(w).Encode(status)
+					} else {
+						_ = json.NewEncoder(w).Encode(statuses)
+					}
+				case "/repos/acme/repo/pulls/1/comments", "/repos/acme/repo/pulls/1/reviews":
 					_, _ = w.Write([]byte(`[]`))
 				case "/apis/kelos.dev/v1alpha2/namespaces/agents/tasks":
 					if r.Method != "GET" {
@@ -71,9 +82,16 @@ func TestRetainedEditorsPreventNewWork(t *testing.T) {
 			}
 			for range 2 {
 				err = editor.Poll(context.Background(), gh, kube, []string{"acme/repo"}, editor.Config{Namespace: "agents", Workspace: "repo", AgentConfig: "editor", Secret: "codex"}, "controller")
-				if (err != nil) != (phase == "Succeeded") {
+				if (err != nil) != (phase == "Succeeded" || phase == "Failed") {
 					t.Fatalf("unexpected result: %v", err)
 				}
+			}
+			if phase == "Failed" || phase == "Succeeded" {
+				if len(statuses) != 1 {
+					t.Fatalf("got %d failure comments, want one", len(statuses))
+				}
+			} else if len(statuses) != 0 {
+				t.Fatal("active Task marked failed")
 			}
 		})
 	}
@@ -91,6 +109,7 @@ func TestEditorResultAccounting(t *testing.T) {
 		{name: "fixed", outcome: "fixed"}, {name: "inline reply", outcome: "fixed", inline: true}, {name: "copied inline reply is not controller evidence", outcome: "fixed", inline: true, spoof: true}, {name: "already satisfied", outcome: "already-satisfied"},
 		{name: "human attention", outcome: "needs-human", wantError: true},
 		{name: "missing disposition", missing: true, wantError: true},
+		{name: "malformed result", wantError: true},
 		{name: "wrong head", outcome: "fixed", badHead: true, wantError: true}, {name: "unpublished result", outcome: "fixed", unpublished: true, wantError: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -105,6 +124,9 @@ func TestEditorResultAccounting(t *testing.T) {
 			result := `{"head":"` + head + `","commit":"def","dispositions":[{"id":"finding-0","outcome":"` + tc.outcome + `","explanation":"Checked the assigned scenario."}]}`
 			if tc.missing {
 				result = `{"head":"abc","commit":"def","dispositions":[]}`
+			}
+			if tc.name == "malformed result" {
+				result = "not JSON"
 			}
 			var replies []map[string]string
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -191,8 +213,13 @@ func TestEditorResultAccounting(t *testing.T) {
 				}
 			}
 			want := 1
+			if tc.outcome == "needs-human" {
+				want = 2
+			}
 			if tc.missing || tc.badHead || tc.unpublished {
-				want = 0
+				if !strings.Contains(replies[0]["body"], "lgtm <full SHA>") {
+					t.Fatal("missing recovery instructions")
+				}
 			}
 			if len(replies) != want {
 				t.Fatalf("got %d replies, want %d", len(replies), want)
@@ -206,7 +233,7 @@ func TestEditorResultAccounting(t *testing.T) {
 					t.Fatalf("reply differs from golden: %q", replies[0]["body"])
 				}
 			}
-			if want == 1 && !strings.Contains(replies[0]["body"], "[finding-0](https://github.com/acme/repo/pull/1#issuecomment-10): **"+tc.outcome+"**") {
+			if !tc.wantError && want == 1 && !strings.Contains(replies[0]["body"], "[finding-0](https://github.com/acme/repo/pull/1#issuecomment-10): **"+tc.outcome+"**") {
 				t.Fatalf("missing correlation: %v", replies)
 			}
 		})
