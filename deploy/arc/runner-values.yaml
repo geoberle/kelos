@@ -1,0 +1,23 @@
+# gha-runner-scale-set 0.13.1; dedicated repository-only review runners.
+githubConfigUrl: https://github.com/hearthctl/kelos-orchestrator
+githubConfigSecret: arc-github-pat
+runnerScaleSetName: kelos-ocr
+minRunners: 0
+maxRunners: 2
+controllerServiceAccount:
+  namespace: arc-systems
+  name: arc-controller-gha-rs-controller
+template:
+  spec:
+    automountServiceAccountToken: false
+    containers:
+      - name: runner
+        image: ghcr.io/actions/actions-runner:2.331.0@sha256:dced476aa42703ebd9aafc295ce52f160989c4528e831fc3be2aef83a1b3f6da
+        command: ["/home/runner/run.sh"]
+        resources:
+          requests:
+            cpu: 500m
+            memory: 1Gi
+          limits:
+            cpu: '2'
+            memory: 4Gi
