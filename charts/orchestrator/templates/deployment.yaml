@@ -17,7 +17,7 @@ spec:
         checksum/configuration: {{ toJson .Values.configuration | sha256sum }}
     spec:
       serviceAccountName: {{ .Release.Name }}
-      automountServiceAccountToken: {{ if or .Values.configuration.editor .Values.configuration.assessment }}true{{ else }}false{{ end }}
+      automountServiceAccountToken: {{ if or .Values.configuration.editor .Values.configuration.assessment .Values.configuration.implementation }}true{{ else }}false{{ end }}
       imagePullSecrets: {{ toJson .Values.imagePullSecrets }}
       securityContext:
         runAsNonRoot: true
@@ -61,4 +61,4 @@ apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: {{ .Release.Name }}
-automountServiceAccountToken: {{ if or .Values.configuration.editor .Values.configuration.assessment }}true{{ else }}false{{ end }}
+automountServiceAccountToken: {{ if or .Values.configuration.editor .Values.configuration.assessment .Values.configuration.implementation }}true{{ else }}false{{ end }}

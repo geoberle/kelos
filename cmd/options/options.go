@@ -20,6 +20,7 @@ import (
 
 	"github.com/hearthctl/kelos-orchestrator/internal/admission"
 	"github.com/hearthctl/kelos-orchestrator/internal/editor"
+	"github.com/hearthctl/kelos-orchestrator/internal/implementation"
 	merge "github.com/hearthctl/kelos-orchestrator/internal/merge"
 	"github.com/hearthctl/kelos-orchestrator/internal/review"
 )
@@ -32,6 +33,7 @@ type configuration struct {
 	Assessment      *merge.AssessmentConfig `json:"assessment,omitempty"`
 	MergeEnabled    bool                    `json:"mergeEnabled,omitempty"`
 	Editor          *editor.Config          `json:"editor,omitempty"`
+	Implementation  *implementation.Config  `json:"implementation,omitempty"`
 	Version         string                  `json:"version"`
 	Repositories    []string                `json:"repositories"`
 	PollInterval    string                  `json:"pollInterval"`
@@ -86,6 +88,9 @@ func (o *RawOptions) Validate() (*ValidatedOptions, error) {
 	if config.Assessment != nil && (len(config.Assessment.Namespace) == 0 || len(config.Assessment.AgentConfig) == 0 || len(config.Assessment.Secret) == 0 || len(config.ControllerLogin) == 0) {
 		return nil, fmt.Errorf("assessment requires namespace, agentConfig, secret and controllerLogin")
 	}
+	if config.Implementation != nil && (len(config.Implementation.Namespace) == 0 || len(config.ControllerLogin) == 0) {
+		return nil, fmt.Errorf("implementation requires namespace and controllerLogin")
+	}
 	// A Task started in another repository's Workspace would edit the wrong clone.
 	for _, repo := range config.Repositories {
 		if config.Editor != nil && len(config.Editor.Workspaces[repo]) == 0 {
@@ -121,7 +126,7 @@ func (o *ValidatedOptions) Complete() (*Options, error) {
 	}
 	client := github.NewClient(&http.Client{Transport: transport, Timeout: 30 * time.Second})
 	var kube dynamic.Interface
-	if o.config.Editor != nil || o.config.Assessment != nil {
+	if o.config.Editor != nil || o.config.Assessment != nil || o.config.Implementation != nil {
 		config, err := rest.InClusterConfig()
 		if err != nil {
 			return nil, err
@@ -136,9 +141,20 @@ func (o *ValidatedOptions) Complete() (*Options, error) {
 func (o *Options) Run(ctx context.Context, logger logr.Logger) error {
 	ticker := time.NewTicker(o.interval)
 	defer ticker.Stop()
+	// Admission posts the run command only for TaskSpawners that require it,
+	// which is the setup implementation reporting assumes.
+	runCommandAuthor := ""
+	if o.config.Implementation != nil {
+		runCommandAuthor = o.config.ControllerLogin
+	}
 	for {
-		if err := admission.Poll(ctx, o.client, o.config.Repositories); err != nil {
+		if err := admission.Poll(ctx, o.client, o.config.Repositories, runCommandAuthor); err != nil {
 			logger.Error(err, "Admission poll failed")
+		}
+		if o.config.Implementation != nil {
+			if err := implementation.Poll(ctx, o.client, o.kubernetes, o.config.Repositories, *o.config.Implementation, o.config.ControllerLogin); err != nil {
+				logger.Error(err, "Implementation poll failed")
+			}
 		}
 		if len(o.config.ControllerLogin) > 0 {
 			if err := review.Poll(ctx, o.client, o.config.Repositories, o.config.ControllerLogin); err != nil {

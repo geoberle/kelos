@@ -69,10 +69,102 @@ func TestAdmission(t *testing.T) {
 			client := github.NewClient(server.Client())
 			client.BaseURL, _ = url.Parse(server.URL + "/")
 			for range 2 {
-				err := admission.Poll(context.Background(), client, []string{"owner/allowed"})
+				err := admission.Poll(context.Background(), client, []string{"owner/allowed"}, "")
 				if (err != nil) != tc.fail {
 					t.Fatalf("error: %v", err)
 				}
+			}
+			golden, err := os.ReadFile("testdata/" + tc.want + ".golden")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := strings.Join(mutations, "\n"); got != strings.TrimSpace(string(golden)) {
+				t.Fatalf("mutations %q want %q", got, golden)
+			}
+		})
+	}
+}
+
+func TestAdmissionPostsRunCommand(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		labels     string
+		comments   string
+		controller string
+		want       string
+	}{
+		{
+			name:       "admitting posts the command before the label",
+			labels:     `[{"name":"ready-for-agent"}]`,
+			comments:   `[]`,
+			controller: "controller[bot]",
+			want:       "command-and-admit",
+		},
+		{
+			name:       "command is never posted twice on an issue",
+			labels:     `[{"name":"ready-for-agent"}]`,
+			comments:   `[{"user":{"login":"controller[bot]"},"body":"/kelos run"}]`,
+			controller: "controller[bot]",
+			want:       "admit",
+		},
+		{
+			name:       "command from another user does not count as posted",
+			labels:     `[{"name":"ready-for-agent"}]`,
+			comments:   `[{"user":{"login":"someone"},"body":"/kelos run"}]`,
+			controller: "controller[bot]",
+			want:       "command-and-admit",
+		},
+		{
+			name:       "already admitted issue gets no command",
+			labels:     `[{"name":"ready-for-agent"},{"name":"agent-start"}]`,
+			comments:   `[]`,
+			controller: "controller[bot]",
+			want:       "none",
+		},
+		{
+			name:       "no controller identity admits by label only",
+			labels:     `[{"name":"ready-for-agent"}]`,
+			comments:   `[]`,
+			controller: "",
+			want:       "admit",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var mutations []string
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				switch {
+				case r.Method == "POST" && r.URL.Path == "/repos/owner/allowed/issues/1/comments":
+					var comment struct {
+						Body string `json:"body"`
+					}
+					if err := json.NewDecoder(r.Body).Decode(&comment); err != nil {
+						t.Error(err)
+					}
+					mutations = append(mutations, "POST comment "+comment.Body)
+					_, _ = w.Write([]byte(`{}`))
+				case r.Method == "POST" && r.URL.Path == "/repos/owner/allowed/issues/1/labels":
+					mutations = append(mutations, "POST agent-start")
+					_, _ = w.Write([]byte(`[]`))
+				case r.Method == "GET" && r.URL.Path == "/repos/owner/allowed/issues/1/comments":
+					if len(tc.controller) == 0 {
+						t.Error("comments read without a controller identity")
+					}
+					_, _ = w.Write([]byte(tc.comments))
+				case r.Method == "GET" && r.URL.Path == "/repos/owner/allowed/issues/1/dependencies/blocked_by":
+					_, _ = w.Write([]byte(`[]`))
+				case r.Method == "GET" && r.URL.Path == "/repos/owner/allowed/issues":
+					_, _ = w.Write([]byte(`[{"number":1,"state":"open","labels":` + tc.labels + `}]`))
+				default:
+					t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+					w.WriteHeader(500)
+				}
+			}))
+			defer server.Close()
+			client := github.NewClient(server.Client())
+			client.BaseURL, _ = url.Parse(server.URL + "/")
+			if err := admission.Poll(context.Background(), client, []string{"owner/allowed"}, tc.controller); err != nil {
+				t.Fatal(err)
 			}
 			golden, err := os.ReadFile("testdata/" + tc.want + ".golden")
 			if err != nil {

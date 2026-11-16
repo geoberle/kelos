@@ -25,6 +25,12 @@ Human-declared issue readiness, identified by `ready-for-agent`. Blocking prereq
 **Agent start**:
 Issue admission granted after readiness and blocker checks, identified by `agent-start`.
 
+**Run command**:
+The issue comment `/kelos run` that starts an implementation Task. Issue admission posts it once; an authorized human posts it to retry a stopped Task.
+
+**Stop report**:
+The comment on an issue stating why its implementation Task ended without completing the issue, which acceptance criteria are unmet, and how to proceed.
+
 **Must-fix finding**:
 A demonstrated correctness, security, compatibility, or operational problem, or a material violation of an agreed requirement. Prevents review completion until addressed.
 

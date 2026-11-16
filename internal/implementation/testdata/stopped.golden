@@ -1,0 +1,17 @@
+<!-- kelos-implementation-stopped/v1 uid-1 -->
+Kelos Task `owner-repo-implementation-3` stopped without completing this issue.
+
+**Why it stopped**
+
+> No StopWatch is attached to this workspace.
+> /kelos run
+
+**Unmet acceptance criteria**
+
+> - Works on the device
+
+**How to proceed**
+
+> Run docs/checklist.md on the device.
+
+The work so far is on branch `agent/issue-3`. After addressing the above, comment `/kelos run` on this issue to retry. A retry deletes this Task and its log.

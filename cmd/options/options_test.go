@@ -113,3 +113,39 @@ func TestValidateRequiresWorkspacePerRepository(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateImplementation(t *testing.T) {
+	tests := []struct {
+		name    string
+		config  string
+		wantErr bool
+	}{
+		{
+			name:   "namespace and controller identity",
+			config: `{"version":"v1","repositories":["hearthctl/lunactl"],"pollInterval":"1m","controllerLogin":"controller[bot]","implementation":{"namespace":"agents"}}`,
+		},
+		{
+			name:    "namespace missing",
+			config:  `{"version":"v1","repositories":["hearthctl/lunactl"],"pollInterval":"1m","controllerLogin":"controller[bot]","implementation":{}}`,
+			wantErr: true,
+		},
+		{
+			name:    "controller identity missing",
+			config:  `{"version":"v1","repositories":["hearthctl/lunactl"],"pollInterval":"1m","implementation":{"namespace":"agents"}}`,
+			wantErr: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			config := filepath.Join(dir, "config.json")
+			if err := os.WriteFile(config, []byte(tt.config), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			_, err := (&RawOptions{ConfigFile: config, AppCredentialDir: dir}).Validate()
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("Validate() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}

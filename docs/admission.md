@@ -17,8 +17,10 @@ coordinated execution gate and is not implemented by this label-only slice.
 
 Repeated polls and process restarts consult GitHub labels rather than in-memory
 admission history. Kelos owns Task creation and deduplication. Retain its Tasks;
-removing a Task must not serve as an implicit retry mechanism. This slice neither
-calls the Kubernetes API nor needs a Role/RoleBinding. Kubernetes Task behavior is
+a Task is retried only by the run command described in
+[implementation.md](implementation.md). When `configuration.implementation` is
+set, admission posts `/kelos run` on an issue before adding `agent-start`, once
+per issue. Admission neither calls the Kubernetes API nor needs a Role/RoleBinding. Kubernetes Task behavior is
 not tested by the admission HTTP fixtures and remains an integration acceptance
 check.
 

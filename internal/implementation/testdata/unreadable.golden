@@ -1,0 +1,15 @@
+<!-- kelos-implementation-stopped/v1 uid-1 -->
+Kelos Task `owner-repo-implementation-3` stopped without completing this issue.
+
+**Why it stopped**
+
+> The Task ended without a readable final result. Its final message was:
+>
+> Issue #3 remains incomplete.
+> No PR was created.
+
+**How to proceed**
+
+> Read the final message above, correct the issue or the branch, then retry.
+
+The work so far is on branch `agent/issue-3`. After addressing the above, comment `/kelos run` on this issue to retry. A retry deletes this Task and its log.
