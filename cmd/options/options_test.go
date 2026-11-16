@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -208,5 +209,38 @@ func TestGitHubClientRevalidatesRepeatedReads(t *testing.T) {
 	_ = response.Body.Close()
 	if last := validators[len(validators)-1]; len(last) != 0 {
 		t.Fatalf("validator sent after forgetting = %q, want none", last)
+	}
+}
+
+func TestGitHubClientCachesResponsesTheCallerDoesNotReadToTheEnd(t *testing.T) {
+	// go-github stops reading once the JSON value is complete, so a large
+	// response is never read to its end; such a response must be cached too.
+	body := `{"items":["` + strings.Repeat("x", 1<<20) + `"]}` + "\n"
+	var validators []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		validators = append(validators, r.Header.Get("If-None-Match"))
+		w.Header().Set("ETag", `"v1"`)
+		if r.Header.Get("If-None-Match") == `"v1"` {
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
+		_, _ = w.Write([]byte(body))
+	}))
+	defer server.Close()
+
+	client, _ := newHTTPClient(http.DefaultTransport)
+	for range 2 {
+		response, err := client.Get(server.URL + "/repos/owner/repo/issues/1/comments")
+		if err != nil {
+			t.Fatal(err)
+		}
+		// Read only the beginning, then close, as a streaming decoder does.
+		if _, err := io.ReadFull(response.Body, make([]byte, 16)); err != nil {
+			t.Fatal(err)
+		}
+		_ = response.Body.Close()
+	}
+	if want := []string{"", `"v1"`}; !slices.Equal(validators, want) {
+		t.Fatalf("validators sent = %q, want %q", validators, want)
 	}
 }

@@ -1,6 +1,7 @@
 package options
 
 import (
+	"io"
 	"net/http"
 	"sync"
 	"time"
@@ -26,7 +27,22 @@ type revalidate struct{ next http.RoundTripper }
 func (r revalidate) RoundTrip(request *http.Request) (*http.Response, error) {
 	request = request.Clone(request.Context())
 	request.Header.Set("Cache-Control", "max-age=0")
-	return r.next.RoundTrip(request)
+	response, err := r.next.RoundTrip(request)
+	if response != nil && response.Body != nil {
+		response.Body = drained{response.Body}
+	}
+	return response, err
+}
+
+// drained reads a body to its end before closing it. The cache stores a
+// response only once its body is fully read, and the GitHub client stops
+// reading as soon as the JSON value is complete, which leaves the tail of a
+// large response unread.
+type drained struct{ io.ReadCloser }
+
+func (d drained) Close() error {
+	_, _ = io.Copy(io.Discard, d.ReadCloser)
+	return d.ReadCloser.Close()
 }
 
 // meter counts what one poll costs and owns the response cache.
