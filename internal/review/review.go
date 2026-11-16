@@ -88,6 +88,12 @@ type Evidence struct {
 	Result  Result `json:"result"`
 }
 
+// FindingID identifies one finding of this review run and attempt. Editor
+// assignments, dispositions and handled receipts all refer to it.
+func (e *Evidence) FindingID(index int) string {
+	return fmt.Sprintf("%s/%d/%d/%d/%s/%d", e.Repository, e.PR, e.Run, e.Attempt, e.Head, index)
+}
+
 type Finding struct {
 	Path     string `json:"path"`
 	Start    int    `json:"start_line"`
@@ -136,7 +142,7 @@ func reconcile(ctx context.Context, c *github.Client, owner, repo string, pr *gi
 			reconcileErr = errors.Join(reconcileErr, withdraw())
 		}
 	}()
-	decision, err := evaluate(ctx, c, owner, repo, pr)
+	decision, err := evaluate(ctx, c, owner, repo, pr, controllerLogin)
 	if err != nil {
 		return err
 	}
@@ -218,7 +224,7 @@ func reconcile(ctx context.Context, c *github.Client, owner, repo string, pr *gi
 	if published != nil && published.GetUser().GetID() != user.GetID() {
 		return fmt.Errorf("credential does not match controllerLogin")
 	}
-	latest, err := evaluate(ctx, c, owner, repo, pr)
+	latest, err := evaluate(ctx, c, owner, repo, pr, controllerLogin)
 	if err != nil {
 		return err
 	}
@@ -259,7 +265,7 @@ type outcome struct {
 	Evidence *Evidence
 }
 
-func evaluate(ctx context.Context, c *github.Client, owner, repo string, pr *github.PullRequest) (outcome, error) {
+func evaluate(ctx context.Context, c *github.Client, owner, repo string, pr *github.PullRequest, controllerLogin string) (outcome, error) {
 	workflow, _, err := c.Actions.GetWorkflowByFileName(ctx, owner, repo, "ocr.yml")
 	if err != nil {
 		return outcome{Reason: ""}, err
@@ -422,7 +428,6 @@ func evaluate(ctx context.Context, c *github.Client, owner, repo string, pr *git
 			if len(selected) > 0 {
 				return outcome{Reason: "Incomplete coverage."}, nil
 			}
-			mustFix := false
 			for _, finding := range r.Comments {
 				if len(finding.Path) == 0 || len(finding.Content) == 0 || finding.Start < 0 || finding.End < finding.Start {
 					return outcome{Reason: "Malformed finding."}, nil
@@ -438,17 +443,27 @@ func evaluate(ctx context.Context, c *github.Client, owner, repo string, pr *git
 					return outcome{Reason: "Finding outside reviewed coverage."}, nil
 				}
 				switch finding.Severity {
-				case "critical", "high":
-					mustFix = true
-				case "medium", "low":
+				case "critical", "high", "medium", "low":
 				default:
 					return outcome{Reason: "Unknown finding severity."}, nil
 				}
 			}
-			if mustFix {
-				return outcome{Reason: "Must-fix findings remain; evidence retained for editing.", Evidence: retained}, nil
+			if len(r.Comments) == 0 {
+				return outcome{Reason: "Complete current review; no findings.", Complete: true, Evidence: retained}, nil
 			}
-			return outcome{Reason: "Complete current review; no must-fix findings.", Complete: true, Evidence: retained}, nil
+			// Every finding needs an editor disposition, whatever its severity.
+			// One answered without a commit triggers no new review, so the
+			// editor's receipt is what closes it.
+			handled, err := feedback.Handled(ctx, c, owner, repo, pr.GetNumber(), id.Head, controllerLogin)
+			if err != nil {
+				return outcome{Reason: ""}, err
+			}
+			for index := range r.Comments {
+				if !handled[retained.FindingID(index)] {
+					return outcome{Reason: "Findings remain; evidence retained for editing.", Evidence: retained}, nil
+				}
+			}
+			return outcome{Reason: "Complete current review; every finding addressed.", Complete: true, Evidence: retained}, nil
 		}
 		if response.NextPage == 0 {
 			break
@@ -602,8 +617,8 @@ func decodeEvidence(data []byte, target any) error {
 
 // CurrentEvidence revalidates the trusted workflow and returns current findings.
 // Historical status comments alone cannot authorize a new editor.
-func CurrentEvidence(ctx context.Context, c *github.Client, owner, repo string, pr *github.PullRequest) (*Evidence, error) {
-	decision, err := evaluate(ctx, c, owner, repo, pr)
+func CurrentEvidence(ctx context.Context, c *github.Client, owner, repo string, pr *github.PullRequest, controllerLogin string) (*Evidence, error) {
+	decision, err := evaluate(ctx, c, owner, repo, pr, controllerLogin)
 	if err != nil || decision.Evidence == nil {
 		return nil, err
 	}
@@ -613,7 +628,7 @@ func CurrentEvidence(ctx context.Context, c *github.Client, owner, repo string, 
 // Complete revalidates the current review and durable human dispositions before
 // an assessment starts. A label or retained status text alone is insufficient.
 func Complete(ctx context.Context, c *github.Client, owner, repo string, pr *github.PullRequest, controller string) (bool, error) {
-	decision, err := evaluate(ctx, c, owner, repo, pr)
+	decision, err := evaluate(ctx, c, owner, repo, pr, controller)
 	if err != nil || !decision.Complete {
 		return false, err
 	}

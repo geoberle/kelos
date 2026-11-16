@@ -33,7 +33,11 @@ func TestVerifiedReviewEvidence(t *testing.T) {
 		{"green workflow with publication failures does not complete", 1, false, "", "", false, 2, "controller"},
 		{"duplicate JSON fields cannot complete", 0, false, `"operation":"review"`, `"operation":"bad","operation":"review"`, false, 2, "controller"},
 		{"must-fix blocks completion", 0, false, `"comments":[]`, `"comments":[{"path":"main.go","start_line":1,"end_line":1,"content":"unsafe","severity":"high"}]`, false, 2, "controller"},
-		{"advisory permits completion", 0, true, `"comments":[]`, `"comments":[{"path":"main.go","start_line":0,"end_line":0,"content":"simplify","severity":"low"}]`, false, 2, "controller"},
+		{"advisory finding blocks completion until addressed", 0, false, `"comments":[]`, `"comments":[{"path":"main.go","start_line":0,"end_line":0,"content":"simplify","severity":"low"}]`, false, 2, "controller"},
+		{"addressed findings permit completion", 0, true, `"comments":[]`, `"comments":[{"path":"main.go","start_line":0,"end_line":0,"content":"simplify","severity":"low"}]`, false, 2, "controller"},
+		{"receipt for another finding does not permit completion", 0, false, `"comments":[]`, `"comments":[{"path":"main.go","start_line":0,"end_line":0,"content":"simplify","severity":"low"}]`, false, 2, "controller"},
+		{"receipt for another commit does not permit completion", 0, false, `"comments":[]`, `"comments":[{"path":"main.go","start_line":0,"end_line":0,"content":"simplify","severity":"low"}]`, false, 2, "controller"},
+		{"receipt from another user does not permit completion", 0, false, `"comments":[]`, `"comments":[{"path":"main.go","start_line":0,"end_line":0,"content":"simplify","severity":"low"}]`, false, 2, "controller"},
 		{"unknown severity blocks completion", 0, false, `"comments":[]`, `"comments":[{"path":"main.go","start_line":1,"end_line":1,"content":"unsafe","severity":"warning"}]`, false, 2, "controller"},
 		{"explicit null findings is a valid empty result", 0, true, `"comments":[]`, `"comments":null`, false, 2, "controller"},
 		{"new human feedback prevents completion", 0, false, "", "", false, 2, "controller"},
@@ -166,6 +170,9 @@ func TestVerifiedReviewEvidence(t *testing.T) {
 				case "/download/identity.json", "/download/ocr-result.json", "/download/publication.json":
 					_, _ = w.Write(archives[strings.TrimPrefix(r.URL.Path, "/download/")])
 					return
+				case "/repos/owner/repo/compare/older...head":
+					// The receipt's commit is an ancestor of the head, yet not the reviewed commit.
+					body = `{"status":"ahead"}`
 				case "/repos/owner/repo/compare/base...head":
 					body = `{"merge_base_commit":{"sha":"base"}}`
 				case "/repos/owner/repo/pulls/1/files":
@@ -216,6 +223,23 @@ func TestVerifiedReviewEvidence(t *testing.T) {
 				if tc.name == "reassessment command does not become feedback" && r.URL.Path == "/repos/owner/repo/issues/1/comments" {
 					body = strings.TrimSuffix(body, "]") + `,{"id":80,"body":"reassess aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","user":{"id":100,"login":"geoberle"}}]`
 					body = strings.Replace(body, "[,", "[", 1)
+				}
+				if r.URL.Path == "/repos/owner/repo/issues/1/comments" && r.Method == "GET" {
+					// The editor's receipt names the finding by review run, attempt, head and index.
+					receipt := ""
+					switch tc.name {
+					case "addressed findings permit completion":
+						receipt = `{"id":70,"body":"<!-- kelos-handled-feedback/v1 -->\n{\"task\":\"editor-1\",\"commit\":\"head\",\"ids\":[\"owner/repo/1/10/2/head/0\"]}","user":{"id":90,"login":"controller"}}`
+					case "receipt for another finding does not permit completion":
+						receipt = `{"id":70,"body":"<!-- kelos-handled-feedback/v1 -->\n{\"task\":\"editor-1\",\"commit\":\"head\",\"ids\":[\"owner/repo/1/10/1/head/0\"]}","user":{"id":90,"login":"controller"}}`
+					case "receipt for another commit does not permit completion":
+						receipt = `{"id":70,"body":"<!-- kelos-handled-feedback/v1 -->\n{\"task\":\"editor-1\",\"commit\":\"older\",\"ids\":[\"owner/repo/1/10/2/head/0\"]}","user":{"id":90,"login":"controller"}}`
+					case "receipt from another user does not permit completion":
+						receipt = `{"id":70,"body":"<!-- kelos-handled-feedback/v1 -->\n{\"task\":\"editor-1\",\"commit\":\"head\",\"ids\":[\"owner/repo/1/10/2/head/0\"]}","user":{"id":91,"login":"someone"}}`
+					}
+					if len(receipt) > 0 {
+						body = strings.Replace(strings.TrimSuffix(body, "]")+","+receipt+"]", "[,", "[", 1)
+					}
 				}
 				if tc.name == "new human feedback prevents completion" && r.URL.Path == "/repos/owner/repo/issues/1/comments" {
 					commentReads++

@@ -121,6 +121,39 @@ func Pending(ctx context.Context, c *github.Client, owner, repo string, number i
 	return unhandled, nil
 }
 
+// Handled returns the finding IDs that an editor addressed at exactly head,
+// read from the controller's retained receipts. A review finding ID names the
+// head it was raised on, so a receipt for any other commit cannot match one.
+func Handled(ctx context.Context, c *github.Client, owner, repo string, number int, head, controller string) (map[string]bool, error) {
+	handled := map[string]bool{}
+	opts := &github.IssueListCommentsOptions{ListOptions: github.ListOptions{PerPage: 100}}
+	for {
+		page, res, err := c.Issues.ListComments(ctx, owner, repo, number, opts)
+		if err != nil {
+			return nil, err
+		}
+		for _, comment := range page {
+			if comment.GetUser().GetLogin() != controller || !strings.HasPrefix(comment.GetBody(), handledMarker) {
+				continue
+			}
+			var r receipt
+			if err := json.Unmarshal([]byte(strings.TrimPrefix(comment.GetBody(), handledMarker)), &r); err != nil {
+				return nil, err
+			}
+			if r.Commit != head {
+				continue
+			}
+			for _, id := range r.IDs {
+				handled[id] = true
+			}
+		}
+		if res.NextPage == 0 {
+			return handled, nil
+		}
+		opts.Page = res.NextPage
+	}
+}
+
 // Record is called only after the editor result, commit ancestry and replies have
 // been validated. Retained receipts allow review completion to survive restarts.
 func Record(ctx context.Context, c *github.Client, owner, repo string, number int, commit, controller, task string, ids []string) error {

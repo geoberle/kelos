@@ -129,6 +129,8 @@ func TestEditorResultAccounting(t *testing.T) {
 				result = "not JSON"
 			}
 			var replies []map[string]string
+			// Receipts for addressed findings are controller comments, not replies.
+			var receipts []string
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
 				switch r.URL.Path {
@@ -147,6 +149,9 @@ func TestEditorResultAccounting(t *testing.T) {
 					_, _ = w.Write([]byte(`{"status":"diverged"}`))
 				case "/repos/acme/repo/compare/abc...def":
 					_, _ = w.Write([]byte(`{"status":"ahead"}`))
+				case "/repos/acme/repo/compare/def...abc":
+					// The listed PR still shows the assigned head; the receipt names the result commit.
+					_, _ = w.Write([]byte(`{"status":"behind"}`))
 				case "/repos/acme/repo/pulls/1/comments":
 					if r.Method == "POST" {
 						var reply struct {
@@ -173,16 +178,24 @@ func TestEditorResultAccounting(t *testing.T) {
 					}
 					_ = json.NewEncoder(w).Encode(comments)
 				case "/repos/acme/repo/issues/1/comments":
-					if tc.inline && r.Method == "POST" {
-						t.Error("inline finding must receive inline reply")
-					}
 					if r.Method == "POST" {
 						var reply map[string]string
 						_ = json.NewDecoder(r.Body).Decode(&reply)
+						if strings.HasPrefix(reply["body"], "<!-- kelos-handled-feedback/v1 -->") {
+							receipts = append(receipts, reply["body"])
+							_ = json.NewEncoder(w).Encode(map[string]any{"body": reply["body"], "user": map[string]string{"login": "controller"}})
+							return
+						}
+						if tc.inline {
+							t.Error("inline finding must receive inline reply")
+						}
 						replies = append(replies, reply)
 						_ = json.NewEncoder(w).Encode(reply)
 					} else {
 						comments := []map[string]any{}
+						for _, receipt := range receipts {
+							comments = append(comments, map[string]any{"body": receipt, "user": map[string]string{"login": "controller"}})
+						}
 						for _, reply := range replies {
 							comments = append(comments, map[string]any{"body": reply["body"], "user": map[string]string{"login": "controller"}})
 						}

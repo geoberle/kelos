@@ -32,7 +32,9 @@ on synchronize with credentials that trigger Actions. The editor does not merge.
 `already-satisfied`, `needs-human`. The controller rejects incomplete accounting,
 checks commit ancestry and membership in the current PR branch, publishes
 explanations as replies to uniquely correlated OCR inline comments or references
-the exact published OCR summary, and never resolves threads. Inline correlation
+the exact published OCR summary. The controller's credential cannot resolve
+review threads; the editor resolves the thread of each OCR finding it answers
+`fixed` or `already-satisfied`. Inline correlation
 requires the run/attempt marker, original commit, path, lines, and finding text;
 ambiguous matches stop scheduling. Reply deduplication accepts only the configured
 controller identity. Needs-human remains pending. Keep Task and

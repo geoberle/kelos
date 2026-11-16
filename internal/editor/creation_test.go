@@ -34,6 +34,8 @@ func TestCurrentFindingsCreateRetainedTask(t *testing.T) {
 		fresh             bool
 		human             bool
 		laterFeedback     bool
+		severity          string
+		limit             bool
 	}{
 		{name: "summary finding"}, {name: "human feedback starts editor", human: true}, {name: "feedback during execution is retained", human: true, laterFeedback: true}, {name: "handled human feedback does not restart", human: true, completed: true},
 		{name: "completed attempt deduplicates", completed: true},
@@ -44,6 +46,8 @@ func TestCurrentFindingsCreateRetainedTask(t *testing.T) {
 		{name: "deletion allowed", protection: `{"enforce_admins":{"enabled":true},"allow_force_pushes":{"enabled":false},"allow_deletions":{"enabled":true}}`, blocked: true},
 		{name: "inline finding", inline: true},
 		{name: "ambiguous inline finding", inline: true, ambiguous: true},
+		{name: "advisory finding starts editor", severity: "low"},
+		{name: "round limit stops further editors", completed: true, limit: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			result, err := os.ReadFile("../review/testdata/complete.json")
@@ -51,7 +55,11 @@ func TestCurrentFindingsCreateRetainedTask(t *testing.T) {
 				t.Fatal(err)
 			}
 			if !tc.human {
-				result = []byte(strings.ReplaceAll(string(result), `"comments":[]`, `"comments":[{"path":"main.go","start_line":1,"end_line":1,"content":"Fix unsafe input","severity":"high"}]`))
+				severity := "high"
+				if len(tc.severity) > 0 {
+					severity = tc.severity
+				}
+				result = []byte(strings.ReplaceAll(string(result), `"comments":[]`, `"comments":[{"path":"main.go","start_line":1,"end_line":1,"content":"Fix unsafe input","severity":"`+severity+`"}]`))
 			}
 			total := 1
 			if tc.human {
@@ -112,6 +120,23 @@ func TestCurrentFindingsCreateRetainedTask(t *testing.T) {
 					items := []any{}
 					if task != nil {
 						items = append(items, task)
+					}
+					// Five finished editors for earlier review attempts of this PR.
+					if tc.limit && task != nil && task["status"].(map[string]any)["phase"] == "Succeeded" {
+						items = []any{}
+						for round := range 5 {
+							encoded, _ := json.Marshal(task)
+							var earlier map[string]any
+							_ = json.Unmarshal(encoded, &earlier)
+							metadata := earlier["metadata"].(map[string]any)
+							metadata["name"] = fmt.Sprintf("round-%d", round)
+							var assigned editor.Assignment
+							_ = json.Unmarshal([]byte(metadata["annotations"].(map[string]any)["orchestrator.kelos.dev/assignment"].(string)), &assigned)
+							assigned.Attempt = 100 + round
+							reassigned, _ := json.Marshal(assigned)
+							metadata["annotations"].(map[string]any)["orchestrator.kelos.dev/assignment"] = string(reassigned)
+							items = append(items, earlier)
+						}
 					}
 					_ = json.NewEncoder(w).Encode(map[string]any{"apiVersion": "kelos.dev/v1alpha2", "kind": "TaskList", "items": items})
 					return
@@ -244,7 +269,7 @@ func TestCurrentFindingsCreateRetainedTask(t *testing.T) {
 					}
 				}
 				err = editor.Poll(context.Background(), client, kube, []string{"owner/repo"}, editor.Config{Namespace: "agents", Workspaces: map[string]string{"owner/repo": "repo", "other/repo": "other"}, AgentConfig: "editor", Secret: "codex"}, "controller")
-				if (err != nil) != (tc.ambiguous || tc.blocked) {
+				if (err != nil) != (tc.ambiguous || tc.blocked || (tc.limit && poll > 0)) {
 					t.Fatalf("unexpected error: %v", err)
 				}
 			}
@@ -292,7 +317,30 @@ func TestCurrentFindingsCreateRetainedTask(t *testing.T) {
 				wantCreates = 2
 			}
 			if creates != wantCreates {
-				t.Fatalf("Task creates=%d want 1", creates)
+				t.Fatalf("Task creates=%d want %d", creates, wantCreates)
+			}
+			if tc.limit {
+				found := false
+				for _, comment := range savedComments {
+					if strings.Contains(comment.GetBody(), "round limit") {
+						found = true
+					}
+				}
+				if !found {
+					t.Fatal("round limit was not reported on the PR")
+				}
+			}
+			if tc.completed && !tc.human {
+				// The receipt is what lets review completion count the finding as addressed.
+				found := false
+				for _, comment := range savedComments {
+					if strings.HasPrefix(comment.GetBody(), "<!-- kelos-handled-feedback/v1 -->") && strings.Contains(comment.GetBody(), `"owner/repo/1/10/2/head/0"`) {
+						found = true
+					}
+				}
+				if !found {
+					t.Fatal("addressed OCR finding has no handled receipt")
+				}
 			}
 			spec := task["spec"].(map[string]any)
 			worker, ok := spec["worker"].(map[string]any)
@@ -307,6 +355,9 @@ func TestCurrentFindingsCreateRetainedTask(t *testing.T) {
 			}
 			if spec["branch"] != "agent-fix" {
 				t.Fatal("Task lost PR branch")
+			}
+			if !strings.Contains(spec["prompt"].(string), "resolveReviewThread") {
+				t.Fatal("prompt does not tell the editor to resolve addressed review threads")
 			}
 			annotations := task["metadata"].(map[string]any)["annotations"].(map[string]any)
 			var assignment editor.Assignment

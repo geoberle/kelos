@@ -10,7 +10,7 @@ Deploy Kelos, a dedicated Go orchestration component, and ARC-managed GitHub Act
 
 Humans mark issues `ready-for-agent`. Go checks blocking prerequisites and applies `agent-start`; Kelos's native issue spawner implements the issue and creates a PR labeled `agent-managed`. Prefer one issue per PR; split larger work into independently implementable issues.
 
-OpenCodeReview (OCR) runs through its GitHub Action on internal runners, using combined Steve and David instructions. Go consumes current-commit review results and schedules Kelos fixes. The cycle continues until no must-fix findings remain, without a repair-round counter. Go then publishes `review-done`, provided no human feedback remains pending.
+OpenCodeReview (OCR) runs through its GitHub Action on internal runners, using combined Steve and David instructions. Go consumes current-commit review results and schedules Kelos fixes. The cycle continues until every finding of the current review is addressed, for at most five repair rounds per PR. Go then publishes `review-done`, provided no human feedback remains pending.
 
 For non-draft PRs with passing required CI and valid review completion, Go runs a separate merge-assessment Task in Kelos. A favorable assessment produces `lgtm`; an authorized human may also apply that same label. Go merges the approved commit with a real merge commit only when CI is green, the PR is non-draft, `hold` is absent, and all GitHub review threads are resolved. Human approval does not require `review-done` or favorable automated assessment.
 
@@ -27,7 +27,7 @@ For non-draft PRs with passing required CI and valid review completion, Go runs 
 9. As a maintainer, I want findings classified by demonstrated consequences, so that style preferences do not create endless repair work.
 10. As an operator, I want review findings and completion evidence tied to an exact commit, so that outdated results cannot authorize work or merging.
 11. As a maintainer, I want review artifacts consumed even when findings cannot be posted inline, so that comment placement does not lose feedback.
-12. As a maintainer, I want must-fix findings handed to a Kelos editor, so that review produces concrete corrections.
+12. As a maintainer, I want every review finding handed to a Kelos editor, so that review produces concrete corrections.
 13. As a maintainer, I want review to run again after corrections, so that the editor's claim of success is independently checked.
 14. As a maintainer, I want review/fix cycles to stop when findings are clear rather than after a fixed number of rounds, so that correct completion is the criterion.
 15. As a maintainer, I want ordinary comments from authorized humans to initiate follow-up work, so that no special command is required.
@@ -78,9 +78,9 @@ For non-draft PRs with passing required CI and valid review completion, Go runs 
 - Steve's priorities: unnecessary complexity and scope, architectural fit and ownership, concrete performance/resource impact, and simpler equivalent solutions.
 - David's priorities: correctness and regression coverage; concurrency, retries, idempotency and partial failure; security/trust boundaries; API compatibility and Kubernetes conventions.
 - Must-fix findings demonstrate a correctness, security, compatibility, or operational problem, or materially violate an agreed requirement. Each states a triggering scenario, consequence, and smallest suitable correction.
-- Should-improve findings are meaningful nonblocking improvements. Optional style or speculative suggestions are usually omitted. Neither prolongs the repair loop.
+- OCR is instructed to report must-fix findings only. Whatever it reports, at any severity, is assigned to an editor and must be addressed before review completes.
 - Read results from the configured trusted OCR workflow's JSON artifact, correlated with workflow run/attempt and reviewed commit. Consume findings and manifest completion separately. GitHub review state `COMMENT`, summary wording, or a green workflow alone is not a review verdict.
-- Ignore obsolete results. A complete OCR result for the current commit, with no must-fix findings and no pending human feedback, permits Go to publish `review-done`.
+- Ignore obsolete results. A complete OCR result for the current commit, whose findings are all addressed, and no pending human feedback, permits Go to publish `review-done`. A finding is addressed when an editor answered it `fixed` or `already-satisfied`.
 - Partial, failed, or missing results block completion. Failed/partial runs stop for manual rerun with a concise Go-published explanation. Skipped results require human `lgtm` rather than automatically granting review completion.
 - Representation of must-fix classification in OCR's native severity schema remains an implementation validation item; do not silently equate an existing severity value with our policy.
 
@@ -89,7 +89,7 @@ For non-draft PRs with passing required CI and valid review completion, Go runs 
 - Go polls authorized human feedback and review results, schedules Kelos Tasks, and preserves feedback received during execution. No inbound webhooks or additional quiet-period batching are required.
 - Serialize editors per PR while allowing unrelated PRs to progress independently. Track exactly which feedback each Task was assigned; new feedback stays pending.
 - Each assigned finding returns `fixed`, `already-satisfied`, or `needs-human`, with a concise explanation. Successful execution alone does not establish completion. `needs-human` remains unresolved.
-- Publish human-readable replies as well as machine-consumable dispositions. Reply to inline findings in their existing threads; reference the originating comment for conversation feedback. Editors do not resolve threads.
+- Publish human-readable replies as well as machine-consumable dispositions. Reply to inline findings in their existing threads; reference the originating comment for conversation feedback. The editor resolves the thread of each OCR finding it answers `fixed` or `already-satisfied`; `needs-human` threads and human feedback threads stay open.
 - New actionable human feedback invalidates `review-done` and `lgtm` even without a code change. Bot status and assessment messages do not constitute new human feedback.
 - Editors push directly under GitHub protection that prohibits force pushes and deletion without bypass, including administrator enforcement. Verify effective protection on the assigned branch before execution. A concurrent human push stops editing rather than permitting overwrite or automatic reconciliation. Preserve work and report the conflict. Failed/conflicted editors await human intervention; pending feedback is retained.
 - Review/fix cycles have no round limit. This does not mean failed executions automatically retry.
@@ -146,7 +146,7 @@ The following are bounded validation and implementation decisions, not permissio
 
 1. **Human approval binding (resolved):** use `lgtm <full SHA>` comments; bare labels are not approval evidence.
 2. **Merge races (resolved):** use repository enforcement and the SHA precondition, plus a final recheck of mutable gates. The remaining hold/feedback race is accepted and documented.
-3. **OCR thread resolution:** verify whether OCR resolves previous findings after a clean rerun. Editors must not resolve them; absent reviewer-side resolution, humans must do so, even when review is clean.
+3. **OCR thread resolution (resolved):** the editor resolves the threads of findings it addressed; see ADR 0011.
 4. **OCR policy and coverage:** encode consequence-based must-fix classification in the supported result contract. Explicitly include tests/golden fixtures where relevant rather than unintentionally inheriting exclusions. Confirm complete versus skipped coverage semantics for the chosen version.
 5. **Evidence and failure recovery:** specify durable feedback identifiers, disposition schema, evidence retention, interrupted-editor work preservation, and explicit manual restart actions. Merge-assessment recovery uses authorized `reassess <full SHA>` comments without automatic retries on unchanged commits (ADR 0008).
 6. **Operational configuration:** choose actual managed repositories, cluster/namespace details, model settings, credentials and bot identity, polling interval, resource limits, Task retention, and required repository rules. Ensure credentials used for agent pushes actually trigger the intended OCR workflow.

@@ -47,7 +47,7 @@ passed. `GOTOOLCHAIN=go1.25.5 make fmt test lint fmt-check` passed, including
 race-enabled admission, editor, merge and review tests; formatting changed no code. Upstream
 checkout HEAD was verified as `7e5ce06c88de5ce81df5dc4f24e2e485b517fae8`.
 The source contract is documented in [the handoff](opencodereview-handoff.md):
-critical/high mean consequence-based must-fix; medium/low are advisory;
+critical/high mean consequence-based must-fix; nothing else is to be reported;
 selected coverage is distinct from excluded coverage; publication failures block
 completion; reruns have distinct attempts; thread resolution is deliberately off.
 The upstream publication test exercises its GitHub boundary without publishing.

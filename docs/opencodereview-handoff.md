@@ -12,7 +12,7 @@ Workflow success alone is insufficient: partial results may exit successfully. M
 
 ## Agreed poller handoff
 
-Poll the configured trusted workflow, identify each run and attempt, and read its JSON artifact. Verify `manifest.input.resolved_head` matches the PR head before acting. Ignore obsolete results and wait for review of the current commit. Use findings as editor input, and manifest completion as evidence distinct from the findings themselves. Go publishes `review-done` only for a complete current-commit result with no must-fix findings or pending human feedback. Do not infer clean review from missing comments or a green workflow alone.
+Poll the configured trusted workflow, identify each run and attempt, and read its JSON artifact. Verify `manifest.input.resolved_head` matches the PR head before acting. Ignore obsolete results and wait for review of the current commit. Use findings as editor input, and manifest completion as evidence distinct from the findings themselves. Go publishes `review-done` only for a complete current-commit result with no unaddressed findings or pending human feedback. Do not infer clean review from missing comments or a green workflow alone.
 
 Partial, failed, or missing results block review completion. Failed or partial runs stop for manual rerun, with a concise explanation published by Go. A skipped review requires human `lgtm` rather than establishing `review-done`. The explicit severity mapping below implements our consequence-based [review policy](review-policy.md). This handoff is our proposed use of upstream outputs, not an upstream-prescribed agent protocol. Pin both the Action revision and CLI version when implementing.
 
