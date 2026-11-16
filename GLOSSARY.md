@@ -32,7 +32,10 @@ The issue comment `/kelos run` that starts an implementation Task. Issue admissi
 The comment on an issue stating why its implementation Task ended without completing the issue, which acceptance criteria are unmet, and how to proceed.
 
 **Must-fix finding**:
-A demonstrated correctness, security, compatibility, or operational problem, or a material violation of an agreed requirement. Prevents review completion until addressed.
+A demonstrated correctness, security, compatibility, or operational problem, or a material violation of an agreed requirement. The only kind of finding the reviewer is asked to report.
+
+**Addressed finding**:
+A review finding an editor answered as fixed or already satisfied. Every finding of the current review must be addressed before review completes.
 
 **Feedback disposition**:
 The explicit outcome of addressing a finding: fixed, already satisfied, or needs human attention, accompanied by a concise explanation. A finding needing human attention remains unresolved.

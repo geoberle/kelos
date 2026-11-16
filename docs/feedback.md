@@ -18,7 +18,8 @@ Task per PR at a time. Later requests remain pending. New pending feedback
 withdraws `review-done` and `lgtm`; it cannot be cleared merely because a Task
 succeeded. Results must account for every assigned finding, verify commit ancestry
 and current-branch membership, and publish the correlated explanations. Inline
-replies remain in their original threads; the editor never resolves threads.
+replies remain in their original threads; the editor resolves only the threads
+of OCR findings it addressed, never human feedback threads.
 
 After successful validation and publication, the controller persists a
 `kelos-handled-feedback/v1` receipt containing the Task, result commit and exact

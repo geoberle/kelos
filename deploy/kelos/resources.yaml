@@ -97,7 +97,8 @@ spec:
     Follow the Task's assignment, safety constraints and result instructions.
     Read repository instructions before editing. Make only assigned corrections,
     preserve others' work and verify changes with relevant checks.
-    Do not merge, deploy, resolve review threads or grant approval.
+    Resolve only the review threads your assignment tells you to resolve.
+    Do not merge, deploy or grant approval.
 ---
 apiVersion: kelos.dev/v1alpha2
 kind: AgentConfig
