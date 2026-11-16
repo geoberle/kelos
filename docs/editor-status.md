@@ -27,7 +27,8 @@ deletion explicitly disabled. Missing protection or API failures stop scheduling
 Ruleset-only protection is conservatively rejected. Use the existing OCR Action
 on synchronize with credentials that trigger Actions. The editor does not merge.
 
-`status.results.editor-result` is single-line JSON with `head`, `commit`, and
+The editor's final message, which Kelos stores in `status.results.response`,
+is one JSON object with `head`, `commit`, and
 `dispositions` containing `id`, `outcome`, `explanation`. Outcomes are `fixed`,
 `already-satisfied`, `needs-human`. The controller rejects incomplete accounting,
 checks commit ancestry and membership in the current PR branch, publishes
