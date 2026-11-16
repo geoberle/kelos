@@ -48,6 +48,11 @@ func TestVerifiedReviewEvidence(t *testing.T) {
 		{"skipped cannot complete", 0, false, `"complete"`, `"skipped"`, false, 2, "controller"},
 		{"missing coverage cannot complete", 0, false, `"completed":[{"item_id":"file-1","path":"main.go"}]`, `"completed":[]`, false, 2, "controller"},
 		{"stale review cannot complete", 0, false, `"resolved_head":"head"`, `"resolved_head":"old"`, false, 2, "controller"},
+		{"deleted file excluded from review permits completion", 0, true, `"excluded":[]`, `"excluded":[{"item_id":"file-2","path":"old.go","exclude_reason":"deleted"}]`, false, 2, "controller"},
+		{"file excluded for another reason cannot complete", 0, false, `"excluded":[]`, `"excluded":[{"item_id":"file-2","path":"old.go","exclude_reason":"binary"}]`, false, 2, "controller"},
+		{"excluded file that GitHub reports as modified cannot complete", 0, false, `"excluded":[]`, `"excluded":[{"item_id":"file-2","path":"old.go","exclude_reason":"deleted"}]`, false, 2, "controller"},
+		{"deleted exclusion absent from changed files cannot complete", 0, false, `"excluded":[]`, `"excluded":[{"item_id":"file-2","path":"old.go","exclude_reason":"deleted"}]`, false, 2, "controller"},
+		{"removed file without exclusion cannot complete", 0, false, "", "", false, 2, "controller"},
 		{"new head before publication cannot complete", 0, false, "", "", true, 2, "controller"},
 		{"rerun invalidates evidence", 0, false, "", "", false, 3, "controller"},
 		{"installation token uses configured bot identity", 0, true, "", "", false, 2, "controller[bot]"},
@@ -165,6 +170,12 @@ func TestVerifiedReviewEvidence(t *testing.T) {
 					body = `{"merge_base_commit":{"sha":"base"}}`
 				case "/repos/owner/repo/pulls/1/files":
 					body = `[{"filename":"main.go"}]`
+					switch tc.name {
+					case "deleted file excluded from review permits completion", "file excluded for another reason cannot complete", "removed file without exclusion cannot complete":
+						body = `[{"filename":"main.go"},{"filename":"old.go","status":"removed"}]`
+					case "excluded file that GitHub reports as modified cannot complete":
+						body = `[{"filename":"main.go"},{"filename":"old.go","status":"modified"}]`
+					}
 				case "/users/controller", "/users/controller[bot]":
 					body = fmt.Sprintf(`{"id":90,"login":%q}`, tc.actor)
 				case "/repos/owner/repo/issues/1/comments":

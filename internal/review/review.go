@@ -72,6 +72,8 @@ type identity struct {
 type item struct {
 	ID   string `json:"item_id"`
 	Path string `json:"path"`
+	// ExcludeReason says why OCR did not review an excluded item.
+	ExcludeReason string `json:"exclude_reason,omitempty"`
 }
 type publication struct {
 	identity
@@ -353,7 +355,7 @@ func evaluate(ctx context.Context, c *github.Client, owner, repo string, pr *git
 			}
 			retained := &Evidence{identity: id, Summary: pub.Summary, Result: r}
 			cov := m.Coverage
-			if cov.Selected == nil || cov.Completed == nil || cov.Reused == nil || cov.Failed == nil || cov.Waived == nil || cov.Excluded == nil || len(cov.Selected) == 0 || len(cov.Failed)+len(cov.Waived)+len(cov.Excluded) > 0 {
+			if cov.Selected == nil || cov.Completed == nil || cov.Reused == nil || cov.Failed == nil || cov.Waived == nil || cov.Excluded == nil || len(cov.Selected) == 0 || len(cov.Failed)+len(cov.Waived) > 0 {
 				return outcome{Reason: "Coverage incomplete or excluded; human attention required."}, nil
 			}
 			currentRange, _, err := c.Repositories.CompareCommits(ctx, owner, repo, pr.GetBase().GetSHA(), id.Head, nil)
@@ -362,6 +364,15 @@ func evaluate(ctx context.Context, c *github.Client, owner, repo string, pr *git
 			}
 			if currentRange.GetMergeBaseCommit().GetSHA() != m.Input.Base {
 				return outcome{Reason: "Review range is stale."}, nil
+			}
+			// OCR excludes deleted files because they have no content to
+			// review. Any other exclusion is a coverage gap.
+			deleted := map[string]bool{}
+			for _, i := range cov.Excluded {
+				if i.ExcludeReason != "deleted" || len(i.Path) == 0 {
+					return outcome{Reason: "Coverage incomplete or excluded; human attention required."}, nil
+				}
+				deleted[i.Path] = true
 			}
 			paths := map[string]bool{}
 			for _, i := range cov.Selected {
@@ -376,6 +387,12 @@ func evaluate(ctx context.Context, c *github.Client, owner, repo string, pr *git
 				}
 				for _, file := range files {
 					fileCount++
+					// A deletion claimed by OCR counts only when GitHub
+					// reports the same file as removed.
+					if deleted[file.GetFilename()] && file.GetStatus() == "removed" {
+						delete(deleted, file.GetFilename())
+						continue
+					}
 					if !paths[file.GetFilename()] {
 						return outcome{Reason: "Changed file omitted from review coverage."}, nil
 					}
@@ -386,7 +403,7 @@ func evaluate(ctx context.Context, c *github.Client, owner, repo string, pr *git
 				}
 				fileOptions.Page = response.NextPage
 			}
-			if len(paths) > 0 || fileCount >= 3000 {
+			if len(paths) > 0 || len(deleted) > 0 || fileCount >= 3000 {
 				return outcome{Reason: "Coverage cannot be verified."}, nil
 			}
 			selected := map[string]string{}
