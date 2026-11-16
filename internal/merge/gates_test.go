@@ -24,7 +24,7 @@ func TestGuardedMerge(t *testing.T) {
 	}{
 		{"automated approval without current review", false},
 		{"approved current commit with enforced green CI", true},
-		{"private plan cannot expose protection", false},
+		{"unavailable rules block merge", false},
 		{"edited approval is not reused", false},
 		{"approval deleted before final check", false},
 		{"new human feedback before final check", false}, {"retained deleted feedback invalidates approval", false},
@@ -33,20 +33,25 @@ func TestGuardedMerge(t *testing.T) {
 		{"ambiguous successful merge is recovered", true},
 		{"stale approval stays revoked when head returns", false},
 		{"latest pending check blocks old success", false},
-		{"neutral is not green", false},
-		{"unsupported ruleset blocks merge", false},
+		{"neutral check does not block merge", true},
+		{"skipped check does not block merge", true},
+		{"cancelled check blocks merge", false},
+		{"timed out check blocks merge", false},
+		{"failed commit status blocks merge", false},
+		{"target without pull request rule blocks merge", false},
+		{"linear history blocks merge", false},
+		{"merge method restriction blocks merge", false},
+		{"other rules do not block merge", true},
 		{"check on a different head is rejected", false},
 		{"merge response lost before mutation can retry next poll", false},
 		{"failed test merge checks override green head", false},
 		{"green test merge checks allow merge", true},
 		{"hold prevents merge", false},
 		{"draft prevents merge", false},
-		{"required CI pending", false},
-		{"required CI failed", false},
-		{"required CI missing", false},
-		{"required CI wrong app", false},
+		{"pending check blocks merge", false},
+		{"failed check blocks merge", false},
+		{"no checks at all does not block merge", true},
 		{"unresolved review thread", false},
-		{"admin bypass available", false},
 		{"bare label is not approval", false},
 		{"new head before merge", false},
 	} {
@@ -186,40 +191,48 @@ func TestGuardedMerge(t *testing.T) {
 					if tc.name == "human role revoked" {
 						body = `{"permission":"read","role_name":"read"}`
 					}
-				case "/repos/owner/repo/branches/main/protection":
-					if tc.name == "private plan cannot expose protection" {
-						http.Error(w, `{"message":"Upgrade to GitHub Pro"}`, http.StatusForbidden)
-						return
-					}
-					body = fmt.Sprintf(`{"enforce_admins":{"enabled":%t},"required_status_checks":{"strict":true,"checks":[{"context":"test","app_id":7}]},"required_conversation_resolution":{"enabled":true},"required_pull_request_reviews":{"bypass_pull_request_allowances":{"users":[],"teams":[],"apps":[]}}}`, tc.name != "admin bypass available")
 				case "/repos/owner/repo/rules/branches/main":
-					body = `[]`
-					if tc.name == "unsupported ruleset blocks merge" {
-						body = `[{"type":"future_policy"}]`
+					// Effective rules, including those of an organization ruleset.
+					body = `[{"type":"pull_request","parameters":{"required_approving_review_count":0}}]`
+					switch tc.name {
+					case "unavailable rules block merge":
+						http.Error(w, `{"message":"Resource not accessible by integration"}`, http.StatusForbidden)
+						return
+					case "target without pull request rule blocks merge":
+						body = `[{"type":"deletion"},{"type":"non_fast_forward"}]`
+					case "linear history blocks merge":
+						body = `[{"type":"pull_request","parameters":{}},{"type":"required_linear_history"}]`
+					case "merge method restriction blocks merge":
+						body = `[{"type":"pull_request","parameters":{"allowed_merge_methods":["squash","rebase"]}}]`
+					case "other rules do not block merge":
+						body = `[{"type":"pull_request","parameters":{"allowed_merge_methods":["merge","squash"]}},{"type":"deletion"},{"type":"non_fast_forward"},{"type":"required_status_checks","parameters":{"required_status_checks":[{"context":"test"}]}},{"type":"future_policy"}]`
 					}
 				case "/repos/owner/repo/commits/" + sha + "/check-runs":
 					status, conclusion, app := "completed", "success", 7
-					if tc.name == "required CI pending" {
+					if tc.name == "pending check blocks merge" {
 						status = "in_progress"
 						conclusion = ""
 					}
-					if tc.name == "required CI failed" {
+					switch tc.name {
+					case "failed check blocks merge":
 						conclusion = "failure"
-					}
-					if tc.name == "required CI wrong app" {
-						app = 8
+					case "cancelled check blocks merge":
+						conclusion = "cancelled"
+					case "timed out check blocks merge":
+						conclusion = "timed_out"
+					case "neutral check does not block merge":
+						conclusion = "neutral"
+					case "skipped check does not block merge":
+						conclusion = "skipped"
 					}
 					body = fmt.Sprintf(`{"check_runs":[{"id":20,"head_sha":%q,"name":"test","status":%q,"conclusion":%q,"app":{"id":%d}}]}`, sha, status, conclusion, app)
-					if tc.name == "neutral is not green" {
-						body = strings.ReplaceAll(body, `"success"`, `"neutral"`)
-					}
 					if tc.name == "check on a different head is rejected" {
 						body = strings.ReplaceAll(body, sha, strings.Repeat("b", 40))
 					}
 					if tc.name == "latest pending check blocks old success" {
 						body = strings.Replace(body, `"check_runs":[`, `"check_runs":[{"id":21,"head_sha":"`+sha+`","name":"test","status":"queued","app":{"id":7}},`, 1)
 					}
-					if tc.name == "required CI missing" {
+					if tc.name == "no checks at all does not block merge" {
 						body = `{"check_runs":[]}`
 					}
 				case "/repos/owner/repo/commits/" + strings.Repeat("c", 40) + "/check-runs":
@@ -232,6 +245,9 @@ func TestGuardedMerge(t *testing.T) {
 					body = `[]`
 				case "/repos/owner/repo/commits/" + sha + "/statuses":
 					body = `[]`
+					if tc.name == "failed commit status blocks merge" {
+						body = `[{"context":"legacy","state":"failure"}]`
+					}
 				default:
 					t.Errorf("unexpected %s %s", r.Method, r.URL)
 					http.Error(w, "unexpected", 500)

@@ -14,17 +14,13 @@ persist repository, PR, run, attempt, head and indexed finding IDs in immutable
 Task annotations. Tasks have no TTL. A retained failed, waiting, running, malformed,
 or needs-human Task prevents further scheduling for that PR. Different PRs have
 independent Tasks. Fully accounted successful results allow a new head's verified
-OCR findings to start another Task; there is no repair-round limit.
+OCR findings to start another Task, for at most five rounds per PR.
 
 The prompt requires editing from the assigned head, a remote-head recheck, and
 regular push only. Divergence stops work and preserves the workspace; no force
 push or rebase onto human work is allowed. These are agent execution instructions,
-not an independently enforced Git transport sandbox. ADR 0009 requires GitHub
-protection against force pushes and deletion without bypass; `agent/**` is now
-protected on the public repository. The controller checks effective classic protection on the assigned branch before
-Task creation: administrator enforcement must be enabled, and force pushes and
-deletion explicitly disabled. Missing protection or API failures stop scheduling.
-Ruleset-only protection is conservatively rejected. Use the existing OCR Action
+not an independently enforced Git transport sandbox. The controller does not
+check protection of the editor's branch (ADR 0012). Use the existing OCR Action
 on synchronize with credentials that trigger Actions. The editor does not merge.
 
 The editor's final message, which Kelos stores in `status.results.response`,

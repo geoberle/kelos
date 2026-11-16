@@ -151,10 +151,8 @@ func TestCleanReviewCreatesAssessment(t *testing.T) {
 
 				var body string
 				switch r.URL.Path {
-				case "/repos/owner/repo/branches/main/protection":
-					body = `{"enforce_admins":{"enabled":true},"required_conversation_resolution":{"enabled":true},"required_status_checks":{"strict":true,"contexts":["ci"]}}`
 				case "/repos/owner/repo/rules/branches/main":
-					body = `[]`
+					body = `[{"type":"pull_request","parameters":{"required_approving_review_count":0}}]`
 				case "/repos/owner/repo/commits/head/check-runs":
 					body = `{"check_runs":[{"name":"ci","head_sha":"head","status":"completed","conclusion":"success","app":{"id":1}}]}`
 				case "/repos/owner/repo/commits/head/statuses":

@@ -5,11 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"slices"
 
 	"github.com/google/go-github/v80/github"
 )
 
-// gates supports classic branch protection. Unknown policy is never permission.
+// gates reads the effective branch rules, which include organization rulesets.
 func gates(ctx context.Context, c *github.Client, owner, repo string, pr *github.PullRequest) error {
 	if pr.GetState() != "open" || pr.GetDraft() || pr.GetMerged() || !label(pr, "agent-managed") || label(pr, "hold") || !pr.GetMergeable() || pr.GetMergeableState() != "clean" {
 		return fmt.Errorf("PR is not ready to merge")
@@ -20,60 +21,47 @@ func gates(ctx context.Context, c *github.Client, owner, repo string, pr *github
 	return resolvedThreads(ctx, c, owner, repo, pr.GetNumber())
 }
 
+// requiredCI checks what GitHub's rules do not express for this controller:
+// that the target only takes pull requests and still permits merge commits,
+// and that every check that ran on the commit is green. GitHub enforces the
+// rules themselves when the merge is requested.
 func requiredCI(ctx context.Context, c *github.Client, owner, repo string, pr *github.PullRequest) error {
 	branch := pr.GetBase().GetRef()
 	if len(branch) == 0 {
 		return fmt.Errorf("missing target branch")
 	}
-	protection, _, err := c.Repositories.GetBranchProtection(ctx, owner, repo, branch)
-	if err != nil {
-		return fmt.Errorf("branch enforcement unavailable: %w", err)
-	}
-	if protection == nil || protection.EnforceAdmins == nil || !protection.EnforceAdmins.Enabled || protection.RequiredConversationResolution == nil || !protection.RequiredConversationResolution.Enabled || protection.RequiredStatusChecks == nil || !protection.RequiredStatusChecks.Strict {
-		return fmt.Errorf("required enforcement is not configured")
-	}
-	if protection.RequireLinearHistory != nil && protection.RequireLinearHistory.Enabled {
-		return fmt.Errorf("target prohibits merge commits")
-	}
-	if reviews := protection.RequiredPullRequestReviews; reviews != nil && reviews.BypassPullRequestAllowances != nil {
-		bypass := reviews.BypassPullRequestAllowances
-		if len(bypass.Users)+len(bypass.Teams)+len(bypass.Apps) > 0 {
-			return fmt.Errorf("pull request bypass is configured")
-		}
-	}
-	// Preserve unknown rule types so a newly introduced rule cannot disappear
-	// through typed decoding. Rulesets need their own non-bypass verification.
+	// Effective rules include those of organization rulesets.
 	request, err := c.NewRequest("GET", fmt.Sprintf("repos/%s/%s/rules/branches/%s?per_page=100", owner, repo, url.PathEscape(branch)), nil)
 	if err != nil {
 		return err
 	}
-	var rules []json.RawMessage
+	var rules []struct {
+		Type       string `json:"type"`
+		Parameters struct {
+			AllowedMergeMethods []string `json:"allowed_merge_methods"`
+		} `json:"parameters"`
+	}
 	response, err := c.Do(ctx, request, &rules)
 	if err != nil {
 		return fmt.Errorf("effective rules unavailable: %w", err)
 	}
-	if rules == nil || len(rules) > 0 || response.NextPage != 0 {
-		return fmt.Errorf("ruleset enforcement is not supported")
+	if response.NextPage != 0 {
+		return fmt.Errorf("effective rules exceed one page")
 	}
-	required := []*github.RequiredStatusCheck{}
-	if protection.RequiredStatusChecks.Checks != nil {
-		required = append(required, (*protection.RequiredStatusChecks.Checks)...)
-	}
-	if protection.RequiredStatusChecks.Contexts != nil {
-		for _, name := range *protection.RequiredStatusChecks.Contexts {
-			found := false
-			for _, check := range required {
-				if check != nil && check.Context == name {
-					found = true
-				}
+	pullRequestRequired := false
+	for _, rule := range rules {
+		switch rule.Type {
+		case "pull_request":
+			pullRequestRequired = true
+			if len(rule.Parameters.AllowedMergeMethods) > 0 && !slices.Contains(rule.Parameters.AllowedMergeMethods, "merge") {
+				return fmt.Errorf("target prohibits merge commits")
 			}
-			if !found {
-				required = append(required, &github.RequiredStatusCheck{Context: name})
-			}
+		case "required_linear_history":
+			return fmt.Errorf("target prohibits merge commits")
 		}
 	}
-	if len(required) == 0 {
-		return fmt.Errorf("no required CI checks configured")
+	if !pullRequestRequired {
+		return fmt.Errorf("target branch does not require pull requests")
 	}
 	checkSHA := pr.GetMergeCommitSHA()
 	if len(checkSHA) == 0 {
@@ -90,32 +78,23 @@ func requiredCI(ctx context.Context, c *github.Client, owner, repo string, pr *g
 			return err
 		}
 	}
-	for _, requiredCheck := range required {
-		if requiredCheck == nil || len(requiredCheck.Context) == 0 {
-			return fmt.Errorf("malformed required check")
-		}
-		name := requiredCheck.Context
-		found := false
-		for app, check := range checks[name] {
-			if requiredCheck.GetAppID() > 0 && app != requiredCheck.GetAppID() {
-				continue
+	// Every check that ran must be green; none is named in advance. A skipped
+	// or neutral check ran nothing that could fail.
+	for name, apps := range checks {
+		for _, check := range apps {
+			if check.GetStatus() != "completed" {
+				return fmt.Errorf("check %s is not complete", name)
 			}
-			found = true
-			if check.GetStatus() != "completed" || check.GetConclusion() != "success" {
-				return fmt.Errorf("required check %s is not successful", name)
+			switch check.GetConclusion() {
+			case "success", "skipped", "neutral":
+			default:
+				return fmt.Errorf("check %s is not successful", name)
 			}
 		}
-		if status := statuses[name]; status != nil {
-			// A legacy commit status cannot prove a pinned GitHub App identity.
-			if requiredCheck.GetAppID() <= 0 {
-				found = true
-			}
-			if status.GetState() != "success" {
-				return fmt.Errorf("required status %s is not successful", name)
-			}
-		}
-		if !found {
-			return fmt.Errorf("required check %s is missing", name)
+	}
+	for name, status := range statuses {
+		if status.GetState() != "success" {
+			return fmt.Errorf("status %s is not successful", name)
 		}
 	}
 	return nil

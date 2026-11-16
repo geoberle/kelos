@@ -91,7 +91,7 @@ For non-draft PRs with passing required CI and valid review completion, Go runs 
 - Each assigned finding returns `fixed`, `already-satisfied`, or `needs-human`, with a concise explanation. Successful execution alone does not establish completion. `needs-human` remains unresolved.
 - Publish human-readable replies as well as machine-consumable dispositions. Reply to inline findings in their existing threads; reference the originating comment for conversation feedback. The editor resolves the thread of each OCR finding it answers `fixed` or `already-satisfied`; `needs-human` threads and human feedback threads stay open.
 - New actionable human feedback invalidates `review-done` and `lgtm` even without a code change. Bot status and assessment messages do not constitute new human feedback.
-- Editors push directly under GitHub protection that prohibits force pushes and deletion without bypass, including administrator enforcement. Verify effective protection on the assigned branch before execution. A concurrent human push stops editing rather than permitting overwrite or automatic reconciliation. Preserve work and report the conflict. Failed/conflicted editors await human intervention; pending feedback is retained.
+- Editors push directly to the PR branch with a regular push; force pushes are prohibited by instruction, not by a checked GitHub rule (ADR 0012). A concurrent human push stops editing rather than permitting overwrite or automatic reconciliation. Preserve work and report the conflict. Failed/conflicted editors await human intervention; pending feedback is retained.
 - Review/fix cycles have no round limit. This does not mean failed executions automatically retry.
 
 ### Assessment and merge authorization
