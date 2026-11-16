@@ -190,6 +190,9 @@ func assess(ctx context.Context, c *github.Client, cache *review.Cache, k dynami
 		return err
 	}
 	complete, err := review.Complete(ctx, c, cache, owner, repo, pr, controller)
+	if errors.Is(err, review.ErrWaiting) {
+		return nil
+	}
 	if err != nil {
 		return err
 	}
@@ -288,6 +291,10 @@ func assessmentLabel(ctx context.Context, c *github.Client, cache *review.Cache,
 		return err
 	}
 	approval, err := authorize(ctx, c, cache, owner, repo, current, controller)
+	// An unfinished review run decides nothing: keep the approval as it is.
+	if errors.Is(err, review.ErrWaiting) {
+		return nil
+	}
 	if err != nil || approval == nil {
 		return errors.Join(err, withdraw(ctx, c, owner, repo, current))
 	}

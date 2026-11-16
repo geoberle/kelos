@@ -69,6 +69,10 @@ func reconcile(ctx context.Context, c *github.Client, cache *review.Cache, owner
 		return nil
 	}
 	approval, err := authorize(ctx, c, cache, owner, repo, pr, controller)
+	// An unfinished review run decides nothing: keep the approval, merge later.
+	if errors.Is(err, review.ErrWaiting) {
+		return nil
+	}
 	if err != nil || approval == nil {
 		return errors.Join(err, withdraw(ctx, c, owner, repo, pr))
 	}
@@ -85,6 +89,9 @@ func reconcile(ctx context.Context, c *github.Client, cache *review.Cache, owner
 		return err
 	}
 	latest, err := authorize(ctx, c, cache, owner, repo, current, controller)
+	if errors.Is(err, review.ErrWaiting) {
+		return nil
+	}
 	if err != nil || latest == nil || latest.GetID() != approval.GetID() || current.GetHead().GetSHA() != pr.GetHead().GetSHA() {
 		return errors.Join(err, withdraw(ctx, c, owner, repo, current))
 	}
@@ -97,6 +104,9 @@ func reconcile(ctx context.Context, c *github.Client, cache *review.Cache, owner
 		return err
 	}
 	finalApproval, err := authorize(ctx, c, cache, owner, repo, final, controller)
+	if errors.Is(err, review.ErrWaiting) {
+		return nil
+	}
 	if err != nil || finalApproval == nil || finalApproval.GetID() != approval.GetID() || final.GetHead().GetSHA() != pr.GetHead().GetSHA() {
 		return errors.Join(err, withdraw(ctx, c, owner, repo, final))
 	}

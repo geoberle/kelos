@@ -37,6 +37,7 @@ func TestCleanReviewCreatesAssessment(t *testing.T) {
 		{name: "later skipped OCR invalidates approval", response: `{"commit":"head","recommendation":"approve","reason":"Tested."}`, state: "invalidated", badOCR: "skipped"},
 		{name: "later partial OCR invalidates approval", response: `{"commit":"head","recommendation":"approve","reason":"Tested."}`, state: "invalidated", badOCR: "partial"},
 		{name: "later must-fix OCR invalidates approval", response: `{"commit":"head","recommendation":"approve","reason":"Tested."}`, state: "invalidated", badOCR: "must-fix"},
+		{name: "unfinished OCR run keeps approval", response: `{"commit":"head","recommendation":"approve","reason":"Tested."}`, state: "approve", badOCR: "unfinished"},
 		{name: "valid assessment", response: `{"commit":"head","recommendation":"approve","reason":"Small tested change."}`, state: "approve"},
 		{name: "approval survives absent review-done label", response: `{"commit":"head","recommendation":"approve","reason":"Small tested change."}`, state: "approve"},
 		{name: "needs human remains terminal", response: `{"commit":"head","recommendation":"needs-human","reason":"Migration risk."}`, state: "needs-human"},
@@ -176,6 +177,10 @@ func TestCleanReviewCreatesAssessment(t *testing.T) {
 					if tc.badOCR == "failed" && currentPoll >= 2 {
 						body = strings.ReplaceAll(body, "success", "failure")
 					}
+					// Adding lgtm triggers a run that is listed for a few seconds before it is skipped.
+					if tc.badOCR == "unfinished" && currentPoll >= 2 {
+						body = strings.Replace(body, `"workflow_runs":[`, `"workflow_runs":[{"id":11,"workflow_id":8,"path":".github/workflows/ocr.yml","event":"pull_request_target","run_attempt":1,"status":"in_progress","pull_requests":[{"number":1}]},`, 1)
+					}
 				case "/repos/owner/repo/actions/runs/10":
 					body = fmt.Sprintf(`{"id":10,"run_attempt":%d,"status":"completed","conclusion":"success"}`, 2)
 				case "/repos/owner/repo/actions/runs/11/artifacts":
@@ -192,7 +197,7 @@ func TestCleanReviewCreatesAssessment(t *testing.T) {
 					http.Redirect(w, r, server.URL+"/download/publication.json", http.StatusFound)
 					return
 				case "/download/identity.json", "/download/ocr-result.json", "/download/publication.json":
-					if len(tc.badOCR) > 0 && currentPoll >= 2 && r.URL.Path == "/download/ocr-result.json" {
+					if len(tc.badOCR) > 0 && tc.badOCR != "unfinished" && currentPoll >= 2 && r.URL.Path == "/download/ocr-result.json" {
 						changed := strings.ReplaceAll(string(result), `:"head"`, `:"`+sha+`"`)
 						if tc.badOCR == "must-fix" {
 							changed = strings.ReplaceAll(changed, `"comments":[]`, `"comments":[{"path":"main.go","start_line":1,"end_line":1,"content":"Must fix correctness regression.","severity":"must-fix"}]`)
