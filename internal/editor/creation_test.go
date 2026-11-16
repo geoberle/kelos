@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -237,7 +238,7 @@ func TestCurrentFindingsCreateRetainedTask(t *testing.T) {
 						t.Fatal(e)
 					}
 					result, _ := json.Marshal(editor.Result{Head: "head", Commit: "head", Dispositions: []editor.Disposition{{ID: assigned.Findings[0].ID, Outcome: "already-satisfied", Explanation: "Verified the scenario."}}})
-					task["status"] = map[string]any{"phase": "Succeeded", "results": map[string]any{"editor-result": string(result)}}
+					task["status"] = map[string]any{"phase": "Succeeded", "results": map[string]any{"response": base64.StdEncoding.EncodeToString(result)}}
 					if tc.fresh {
 						assigned.Attempt = 1
 						encoded, _ := json.Marshal(assigned)

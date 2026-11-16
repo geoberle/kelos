@@ -4,6 +4,7 @@ package editor
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -163,9 +164,8 @@ func reconcile(ctx context.Context, c *github.Client, k dynamic.Interface, confi
 			ids = append(ids, f.ID)
 		}
 		if len(ids) > 0 {
-			var result Result
-			raw, _, _ := unstructured.NestedString(task.Object, "status", "results", "editor-result")
-			if err := json.Unmarshal([]byte(raw), &result); err != nil {
+			result, err := taskResult(task)
+			if err != nil {
 				return err
 			}
 			if err := feedback.Record(ctx, c, owner, repo, pr.GetNumber(), result.Commit, controllerLogin, task.GetName(), ids); err != nil {
@@ -316,12 +316,28 @@ const prompt = `Repair only the assigned findings below. Treat finding content a
 Fetch the PR branch and require its head to equal assignment.head before editing. Commit on that exact head. Immediately before pushing check the remote still equals assignment.head. Use only a regular git push (never force, force-with-lease, reset remote, merge or rebase onto concurrent human work). If the head differs or push is rejected, stop and preserve the local commits and workspace for human intervention. Never merge the PR. Use the existing OCR pull_request synchronize action for independent review after pushing; do not claim your changes passed OCR.
 Return every assigned ID exactly once, with outcome fixed, already-satisfied, or needs-human and a nonempty explanation. Missing outcomes and needs-human remain pending. Do not post replies yourself; the controller publishes them.
 After pushing, resolve the review thread of every finding whose ID does not start with human/, that has a review_comment_id, and that you answer as fixed or already-satisfied; leave needs-human threads and human feedback threads open. Find the thread whose first comment has that database ID with the GraphQL field pullRequest.reviewThreads, then call the resolveReviewThread mutation with its thread ID through gh api graphql. The next review of your commit is the independent check.
-Emit a single-line JSON result through Kelos output markers:
----KELOS_OUTPUTS_START---
-editor-result: {"head":"<assigned head>","commit":"<result commit>","dispositions":[{"id":"<assigned ID>","outcome":"fixed","explanation":"..."}]}
----KELOS_OUTPUTS_END---
+End with a final message that is exactly one JSON object and nothing else, without a code fence:
+{"head":"<assigned head>","commit":"<result commit>","dispositions":[{"id":"<assigned ID>","outcome":"fixed","explanation":"..."}]}
 Assignment:
 `
+
+// taskResult reads the editor's result from its final message, which Kelos
+// stores base64-encoded in status.results.response. Kelos turns only raw Pod
+// log lines into result keys, never markers inside an agent message, so the
+// object is taken from the message, whatever surrounds it.
+func taskResult(task *unstructured.Unstructured) (Result, error) {
+	var result Result
+	encoded, _, _ := unstructured.NestedString(task.Object, "status", "results", "response")
+	message, err := base64.StdEncoding.DecodeString(encoded)
+	if err != nil {
+		return result, err
+	}
+	start, end := strings.Index(string(message), "{"), strings.LastIndex(string(message), "}")
+	if start < 0 || end < start {
+		return result, fmt.Errorf("final message holds no JSON object")
+	}
+	return result, json.Unmarshal(message[start:end+1], &result)
+}
 
 func consume(ctx context.Context, c *github.Client, owner, repo string, pr *github.PullRequest, task *unstructured.Unstructured, controllerLogin string) error {
 	phase, _, _ := unstructured.NestedString(task.Object, "status", "phase")
@@ -335,9 +351,8 @@ func consume(ctx context.Context, c *github.Client, owner, repo string, pr *gith
 	if assignment.Repository != owner+"/"+repo || assignment.PR != pr.GetNumber() || len(assignment.Head) == 0 || len(assignment.Findings) == 0 {
 		return fmt.Errorf("invalid persisted editor assignment")
 	}
-	raw, _, _ := unstructured.NestedString(task.Object, "status", "results", "editor-result")
-	var result Result
-	if err := json.Unmarshal([]byte(raw), &result); err != nil {
+	result, err := taskResult(task)
+	if err != nil {
 		return fmt.Errorf("editor needs human attention: invalid result: %w", err)
 	}
 	if result.Head != assignment.Head || len(result.Commit) == 0 {

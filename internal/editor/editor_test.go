@@ -2,6 +2,7 @@ package editor_test
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -137,7 +138,7 @@ func TestEditorResultAccounting(t *testing.T) {
 				case "/repos/acme/repo/pulls":
 					_, _ = w.Write([]byte(`[{"number":1,"labels":[{"name":"agent-managed"}],"head":{"sha":"abc"}}]`))
 				case "/apis/kelos.dev/v1alpha2/namespaces/agents/tasks":
-					body := map[string]any{"apiVersion": "kelos.dev/v1alpha2", "kind": "TaskList", "items": []any{map[string]any{"metadata": map[string]any{"name": "retained", "annotations": map[string]string{"orchestrator.kelos.dev/assignment": assignment}}, "status": map[string]any{"phase": "Succeeded", "results": map[string]string{"editor-result": result}}}}}
+					body := map[string]any{"apiVersion": "kelos.dev/v1alpha2", "kind": "TaskList", "items": []any{map[string]any{"metadata": map[string]any{"name": "retained", "annotations": map[string]string{"orchestrator.kelos.dev/assignment": assignment}}, "status": map[string]any{"phase": "Succeeded", "results": map[string]string{"response": base64.StdEncoding.EncodeToString([]byte("---KELOS_OUTPUTS_START---\neditor-result: " + result + "\n---KELOS_OUTPUTS_END---"))}}}}}
 					_ = json.NewEncoder(w).Encode(body)
 				case "/repos/acme/repo/pulls/1":
 					head := "def"
