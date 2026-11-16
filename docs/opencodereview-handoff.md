@@ -37,7 +37,10 @@ The rules replace default prose and explicitly include `**/*`, including
 `*_test.go`, `testdata/**` and `.golden` files. Binary, secret and oversized files
 can still be excluded. A complete manifest only proves selected coverage:
 inspect excluded/waived entries and do not authorize completion if relevant
-changed tests/goldens or source were omitted without human acceptance.
+changed tests/goldens or source were omitted without human acceptance. Deleted
+files are excluded with `exclude_reason: deleted` because they have no content
+to review; the consumer accepts such an entry only when GitHub reports the same
+file as removed in the pull request.
 
 Consumer contract:
 
