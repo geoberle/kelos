@@ -20,6 +20,7 @@ import (
 	"k8s.io/client-go/rest"
 
 	merge "github.com/hearthctl/kelos-orchestrator/internal/merge"
+	"github.com/hearthctl/kelos-orchestrator/internal/review"
 )
 
 func TestCleanReviewCreatesAssessment(t *testing.T) {
@@ -282,7 +283,7 @@ func TestCleanReviewCreatesAssessment(t *testing.T) {
 					t.Fatal(err)
 				}
 
-				err = merge.Assess(context.Background(), client, kube, []string{"owner/repo"}, merge.AssessmentConfig{Namespace: "agents", Workspaces: map[string]string{"owner/repo": "repo", "other/repo": "other"}, AgentConfig: "editor", Secret: "codex"}, "controller")
+				err = merge.Assess(context.Background(), client, review.NewCache(), kube, []string{"owner/repo"}, merge.AssessmentConfig{Namespace: "agents", Workspaces: map[string]string{"owner/repo": "repo", "other/repo": "other"}, AgentConfig: "editor", Secret: "codex"}, "controller")
 				if err != nil {
 					t.Fatalf("unexpected error: %v", err)
 				}

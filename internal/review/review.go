@@ -21,7 +21,40 @@ import (
 )
 
 // Poll reconciles enrolled PRs in the explicit allowlist.
-func Poll(ctx context.Context, c *github.Client, repositories []string, controllerLogin string) error {
+// Cache spares GitHub requests across the checks that need a PR's review
+// evidence. One Cache lives as long as the process.
+type Cache struct {
+	// artifacts holds the files of review run attempts, which never change.
+	artifacts map[string][]byte
+	// evaluations holds the current poll's result per PR and head.
+	evaluations map[string]outcome
+}
+
+func NewCache() *Cache {
+	return &Cache{artifacts: map[string][]byte{}, evaluations: map[string]outcome{}}
+}
+
+// NextPoll forgets the evaluations of the previous poll.
+func (cache *Cache) NextPoll() {
+	cache.evaluations = map[string]outcome{}
+}
+
+// evaluation returns this poll's evaluation of the PR, shared by review,
+// editor and merge assessment. A check that guards a mutation calls evaluate
+// instead, so that it sees the state at that moment.
+func (cache *Cache) evaluation(ctx context.Context, c *github.Client, owner, repo string, pr *github.PullRequest, controllerLogin string) (outcome, error) {
+	key := fmt.Sprintf("%s/%s#%d@%s", owner, repo, pr.GetNumber(), pr.GetHead().GetSHA())
+	if decision, ok := cache.evaluations[key]; ok {
+		return decision, nil
+	}
+	decision, err := evaluate(ctx, c, cache, owner, repo, pr, controllerLogin)
+	if err == nil {
+		cache.evaluations[key] = decision
+	}
+	return decision, err
+}
+
+func Poll(ctx context.Context, c *github.Client, cache *Cache, repositories []string, controllerLogin string) error {
 	if len(controllerLogin) == 0 || controllerLogin == "geoberle" || controllerLogin == "github-actions[bot]" {
 		return fmt.Errorf("a dedicated controller login is required")
 	}
@@ -39,7 +72,7 @@ func Poll(ctx context.Context, c *github.Client, repositories []string, controll
 				if !label(pr, "agent-managed") {
 					continue
 				}
-				if err := reconcile(ctx, c, owner, repo, pr, controllerLogin); err != nil {
+				if err := reconcile(ctx, c, cache, owner, repo, pr, controllerLogin); err != nil {
 					failures = append(failures, fmt.Errorf("%s#%d: %w", repository, pr.GetNumber(), err))
 				}
 			}
@@ -124,7 +157,7 @@ type Result struct {
 	} `json:"manifest"`
 }
 
-func reconcile(ctx context.Context, c *github.Client, owner, repo string, pr *github.PullRequest, controllerLogin string) (reconcileErr error) {
+func reconcile(ctx context.Context, c *github.Client, cache *Cache, owner, repo string, pr *github.PullRequest, controllerLogin string) (reconcileErr error) {
 	withdrawn := !label(pr, "review-done")
 	withdraw := func() error {
 		if withdrawn {
@@ -142,7 +175,7 @@ func reconcile(ctx context.Context, c *github.Client, owner, repo string, pr *gi
 			reconcileErr = errors.Join(reconcileErr, withdraw())
 		}
 	}()
-	decision, err := evaluate(ctx, c, owner, repo, pr, controllerLogin)
+	decision, err := cache.evaluation(ctx, c, owner, repo, pr, controllerLogin)
 	if err != nil {
 		return err
 	}
@@ -224,7 +257,8 @@ func reconcile(ctx context.Context, c *github.Client, owner, repo string, pr *gi
 	if published != nil && published.GetUser().GetID() != user.GetID() {
 		return fmt.Errorf("credential does not match controllerLogin")
 	}
-	latest, err := evaluate(ctx, c, owner, repo, pr, controllerLogin)
+	// Fresh: this decides whether review-done is published.
+	latest, err := evaluate(ctx, c, cache, owner, repo, pr, controllerLogin)
 	if err != nil {
 		return err
 	}
@@ -265,7 +299,7 @@ type outcome struct {
 	Evidence *Evidence
 }
 
-func evaluate(ctx context.Context, c *github.Client, owner, repo string, pr *github.PullRequest, controllerLogin string) (outcome, error) {
+func evaluate(ctx context.Context, c *github.Client, cache *Cache, owner, repo string, pr *github.PullRequest, controllerLogin string) (outcome, error) {
 	workflow, _, err := c.Actions.GetWorkflowByFileName(ctx, owner, repo, "ocr.yml")
 	if err != nil {
 		return outcome{Reason: ""}, err
@@ -297,7 +331,7 @@ func evaluate(ctx context.Context, c *github.Client, owner, repo string, pr *git
 			} else if len(run.GetDisplayTitle()) > 0 && run.GetDisplayTitle() != fmt.Sprintf("OCR PR #%d", pr.GetNumber()) {
 				continue
 			}
-			data, err := artifact(ctx, c, owner, repo, run.GetID(), fmt.Sprintf("kelos-ocr-identity-%d-%d", run.GetID(), run.GetRunAttempt()), "identity.json")
+			data, err := artifact(ctx, c, cache, owner, repo, run.GetID(), fmt.Sprintf("kelos-ocr-identity-%d-%d", run.GetID(), run.GetRunAttempt()), "identity.json")
 			if err != nil {
 				return outcome{Reason: "Missing trusted correlation evidence; manual rerun required."}, nil
 			}
@@ -314,7 +348,7 @@ func evaluate(ctx context.Context, c *github.Client, owner, repo string, pr *git
 			if run.GetStatus() != "completed" || run.GetConclusion() != "success" {
 				return outcome{Reason: "Review unfinished or publication failed; manual rerun required."}, nil
 			}
-			raw, err := artifact(ctx, c, owner, repo, run.GetID(), fmt.Sprintf("ocr-review-result-%d-%d", run.GetID(), run.GetRunAttempt()), "ocr-result.json")
+			raw, err := artifact(ctx, c, cache, owner, repo, run.GetID(), fmt.Sprintf("ocr-review-result-%d-%d", run.GetID(), run.GetRunAttempt()), "ocr-result.json")
 			if err != nil {
 				return outcome{Reason: "Missing review artifact; manual rerun required."}, nil
 			}
@@ -333,7 +367,7 @@ func evaluate(ctx context.Context, c *github.Client, owner, repo string, pr *git
 			if m.State != "complete" || (len(m.Failure) > 0 && string(m.Failure) != "null") {
 				return outcome{Reason: "Review incomplete; manual rerun required."}, nil
 			}
-			pubRaw, err := artifact(ctx, c, owner, repo, run.GetID(), fmt.Sprintf("kelos-ocr-publication-%d-%d", run.GetID(), run.GetRunAttempt()), "publication.json")
+			pubRaw, err := artifact(ctx, c, cache, owner, repo, run.GetID(), fmt.Sprintf("kelos-ocr-publication-%d-%d", run.GetID(), run.GetRunAttempt()), "publication.json")
 			if err != nil {
 				return outcome{Reason: "Missing publication evidence; manual rerun required."}, nil
 			}
@@ -473,7 +507,20 @@ func evaluate(ctx context.Context, c *github.Client, owner, repo string, pr *git
 	return outcome{Reason: "Waiting for trusted OCR evidence."}, nil
 }
 
-func artifact(ctx context.Context, c *github.Client, owner, repo string, run int64, name, file string) ([]byte, error) {
+func artifact(ctx context.Context, c *github.Client, cache *Cache, owner, repo string, run int64, name, file string) ([]byte, error) {
+	// The artifact name carries the run attempt, so its content is final.
+	key := fmt.Sprintf("%s/%s/%d/%s/%s", owner, repo, run, name, file)
+	if data, ok := cache.artifacts[key]; ok {
+		return data, nil
+	}
+	data, err := download(ctx, c, owner, repo, run, name, file)
+	if err == nil {
+		cache.artifacts[key] = data
+	}
+	return data, err
+}
+
+func download(ctx context.Context, c *github.Client, owner, repo string, run int64, name, file string) ([]byte, error) {
 	opts := &github.ListOptions{PerPage: 100}
 	var found *github.Artifact
 	for {
@@ -617,18 +664,30 @@ func decodeEvidence(data []byte, target any) error {
 
 // CurrentEvidence revalidates the trusted workflow and returns current findings.
 // Historical status comments alone cannot authorize a new editor.
-func CurrentEvidence(ctx context.Context, c *github.Client, owner, repo string, pr *github.PullRequest, controllerLogin string) (*Evidence, error) {
-	decision, err := evaluate(ctx, c, owner, repo, pr, controllerLogin)
+func CurrentEvidence(ctx context.Context, c *github.Client, cache *Cache, owner, repo string, pr *github.PullRequest, controllerLogin string) (*Evidence, error) {
+	decision, err := cache.evaluation(ctx, c, owner, repo, pr, controllerLogin)
 	if err != nil || decision.Evidence == nil {
 		return nil, err
 	}
 	return decision.Evidence, nil
 }
 
-// Complete revalidates the current review and durable human dispositions before
-// an assessment starts. A label or retained status text alone is insufficient.
-func Complete(ctx context.Context, c *github.Client, owner, repo string, pr *github.PullRequest, controller string) (bool, error) {
-	decision, err := evaluate(ctx, c, owner, repo, pr, controller)
+// Complete reports whether review is complete and no human feedback is
+// pending, using this poll's shared evaluation. It decides whether an
+// assessment starts; a label or retained status text alone is insufficient.
+func Complete(ctx context.Context, c *github.Client, cache *Cache, owner, repo string, pr *github.PullRequest, controller string) (bool, error) {
+	decision, err := cache.evaluation(ctx, c, owner, repo, pr, controller)
+	if err != nil || !decision.Complete {
+		return false, err
+	}
+	pending, err := feedback.Pending(ctx, c, owner, repo, pr.GetNumber(), pr.GetHead().GetSHA(), controller)
+	return err == nil && len(pending) == 0, err
+}
+
+// CompleteNow is Complete with a fresh evaluation. It guards approval and
+// merging, which must see the state at that moment.
+func CompleteNow(ctx context.Context, c *github.Client, cache *Cache, owner, repo string, pr *github.PullRequest, controller string) (bool, error) {
+	decision, err := evaluate(ctx, c, cache, owner, repo, pr, controller)
 	if err != nil || !decision.Complete {
 		return false, err
 	}

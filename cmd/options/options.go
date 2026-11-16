@@ -25,6 +25,10 @@ import (
 	"github.com/hearthctl/kelos-orchestrator/internal/review"
 )
 
+// cacheLifetime is how long cached GitHub responses are kept before the cache
+// is emptied; refilling it costs about one poll's worth of counted requests.
+const cacheLifetime = 24 * time.Hour
+
 type RawOptions struct {
 	ConfigFile       string
 	AppCredentialDir string
@@ -49,6 +53,8 @@ type completedOptions struct {
 	config     configuration
 	interval   time.Duration
 	client     *github.Client
+	meter      *meter
+	reviews    *review.Cache
 	kubernetes dynamic.Interface
 }
 type Options struct{ *completedOptions }
@@ -124,7 +130,8 @@ func (o *ValidatedOptions) Complete() (*Options, error) {
 	if err != nil {
 		return nil, err
 	}
-	client := github.NewClient(&http.Client{Transport: transport, Timeout: 30 * time.Second})
+	httpClient, meter := newHTTPClient(transport)
+	client := github.NewClient(httpClient)
 	var kube dynamic.Interface
 	if o.config.Editor != nil || o.config.Assessment != nil || o.config.Implementation != nil {
 		config, err := rest.InClusterConfig()
@@ -136,7 +143,7 @@ func (o *ValidatedOptions) Complete() (*Options, error) {
 			return nil, err
 		}
 	}
-	return &Options{&completedOptions{config: o.config, interval: o.interval, client: client, kubernetes: kube}}, nil
+	return &Options{&completedOptions{config: o.config, interval: o.interval, client: client, meter: meter, reviews: review.NewCache(), kubernetes: kube}}, nil
 }
 func (o *Options) Run(ctx context.Context, logger logr.Logger) error {
 	ticker := time.NewTicker(o.interval)
@@ -147,7 +154,13 @@ func (o *Options) Run(ctx context.Context, logger logr.Logger) error {
 	if o.config.Implementation != nil {
 		runCommandAuthor = o.config.ControllerLogin
 	}
+	forgotten := time.Now()
 	for {
+		if time.Since(forgotten) >= cacheLifetime {
+			o.meter.forget()
+			forgotten = time.Now()
+		}
+		o.reviews.NextPoll()
 		if err := admission.Poll(ctx, o.client, o.config.Repositories, runCommandAuthor); err != nil {
 			logger.Error(err, "Admission poll failed")
 		}
@@ -157,25 +170,27 @@ func (o *Options) Run(ctx context.Context, logger logr.Logger) error {
 			}
 		}
 		if len(o.config.ControllerLogin) > 0 {
-			if err := review.Poll(ctx, o.client, o.config.Repositories, o.config.ControllerLogin); err != nil {
+			if err := review.Poll(ctx, o.client, o.reviews, o.config.Repositories, o.config.ControllerLogin); err != nil {
 				logger.Error(err, "Review poll failed")
 			}
 		}
 		if o.config.Editor != nil {
-			if err := editor.Poll(ctx, o.client, o.kubernetes, o.config.Repositories, *o.config.Editor, o.config.ControllerLogin); err != nil {
+			if err := editor.Poll(ctx, o.client, o.reviews, o.kubernetes, o.config.Repositories, *o.config.Editor, o.config.ControllerLogin); err != nil {
 				logger.Error(err, "Editor poll failed")
 			}
 		}
 		if o.config.Assessment != nil {
-			if err := merge.Assess(ctx, o.client, o.kubernetes, o.config.Repositories, *o.config.Assessment, o.config.ControllerLogin); err != nil {
+			if err := merge.Assess(ctx, o.client, o.reviews, o.kubernetes, o.config.Repositories, *o.config.Assessment, o.config.ControllerLogin); err != nil {
 				logger.Error(err, "Assessment poll failed")
 			}
 		}
 		if o.config.MergeEnabled {
-			if err := merge.Poll(ctx, o.client, o.config.Repositories, o.config.ControllerLogin); err != nil {
+			if err := merge.Poll(ctx, o.client, o.reviews, o.config.Repositories, o.config.ControllerLogin); err != nil {
 				logger.Error(err, "Merge poll failed")
 			}
 		}
+		requests, notModified, remaining := o.meter.reset()
+		logger.Info("Poll finished", "githubRequests", requests, "notModified", notModified, "rateLimitRemaining", remaining)
 		select {
 		case <-ctx.Done():
 			return nil

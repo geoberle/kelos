@@ -11,11 +11,13 @@ import (
 	"time"
 
 	"github.com/google/go-github/v80/github"
+
+	"github.com/hearthctl/kelos-orchestrator/internal/review"
 )
 
 // Poll considers only enrolled open PRs in explicitly configured repositories.
 // Controller must be a dedicated identity, distinct from the authorized human.
-func Poll(ctx context.Context, c *github.Client, repositories []string, controller string) error {
+func Poll(ctx context.Context, c *github.Client, cache *review.Cache, repositories []string, controller string) error {
 	if len(controller) == 0 || controller == "geoberle" {
 		return errors.New("dedicated controller login required")
 	}
@@ -36,7 +38,7 @@ func Poll(ctx context.Context, c *github.Client, repositories []string, controll
 				if !label(pr, "agent-managed") {
 					continue
 				}
-				if err := reconcile(ctx, c, owner, repo, pr.GetNumber(), controller); err != nil {
+				if err := reconcile(ctx, c, cache, owner, repo, pr.GetNumber(), controller); err != nil {
 					failures = append(failures, fmt.Errorf("%s#%d: %w", repository, pr.GetNumber(), err))
 				}
 			}
@@ -58,7 +60,7 @@ func label(pr *github.PullRequest, name string) bool {
 	return false
 }
 
-func reconcile(ctx context.Context, c *github.Client, owner, repo string, number int, controller string) error {
+func reconcile(ctx context.Context, c *github.Client, cache *review.Cache, owner, repo string, number int, controller string) error {
 	pr, _, err := c.PullRequests.Get(ctx, owner, repo, number)
 	if err != nil {
 		return err
@@ -66,7 +68,7 @@ func reconcile(ctx context.Context, c *github.Client, owner, repo string, number
 	if pr.GetMerged() {
 		return nil
 	}
-	approval, err := authorize(ctx, c, owner, repo, pr, controller)
+	approval, err := authorize(ctx, c, cache, owner, repo, pr, controller)
 	if err != nil || approval == nil {
 		return errors.Join(err, withdraw(ctx, c, owner, repo, pr))
 	}
@@ -82,7 +84,7 @@ func reconcile(ctx context.Context, c *github.Client, owner, repo string, number
 	if err != nil {
 		return err
 	}
-	latest, err := authorize(ctx, c, owner, repo, current, controller)
+	latest, err := authorize(ctx, c, cache, owner, repo, current, controller)
 	if err != nil || latest == nil || latest.GetID() != approval.GetID() || current.GetHead().GetSHA() != pr.GetHead().GetSHA() {
 		return errors.Join(err, withdraw(ctx, c, owner, repo, current))
 	}
@@ -94,7 +96,7 @@ func reconcile(ctx context.Context, c *github.Client, owner, repo string, number
 	if err != nil {
 		return err
 	}
-	finalApproval, err := authorize(ctx, c, owner, repo, final, controller)
+	finalApproval, err := authorize(ctx, c, cache, owner, repo, final, controller)
 	if err != nil || finalApproval == nil || finalApproval.GetID() != approval.GetID() || final.GetHead().GetSHA() != pr.GetHead().GetSHA() {
 		return errors.Join(err, withdraw(ctx, c, owner, repo, final))
 	}
@@ -136,7 +138,7 @@ type approvalRecord struct {
 
 // Revocation survives restart and even a later return to the same head.
 // A new comment is required after editing, deletion, feedback or observed pushes.
-func authorize(ctx context.Context, c *github.Client, owner, repo string, pr *github.PullRequest, controller string) (*github.IssueComment, error) {
+func authorize(ctx context.Context, c *github.Client, cache *review.Cache, owner, repo string, pr *github.PullRequest, controller string) (*github.IssueComment, error) {
 	user, _, err := c.Users.Get(ctx, controller)
 	if err != nil {
 		return nil, err
@@ -246,7 +248,7 @@ func authorize(ctx context.Context, c *github.Client, owner, repo string, pr *gi
 		}
 	}
 	if selected == nil {
-		return automaticApproval(ctx, c, owner, repo, pr, controller, comments)
+		return automaticApproval(ctx, c, cache, owner, repo, pr, controller, comments)
 	}
 	permission, _, err := c.Repositories.GetPermissionLevel(ctx, owner, repo, "geoberle")
 	if err != nil {

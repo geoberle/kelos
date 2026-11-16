@@ -15,6 +15,7 @@ import (
 	"github.com/google/go-github/v80/github"
 
 	merge "github.com/hearthctl/kelos-orchestrator/internal/merge"
+	"github.com/hearthctl/kelos-orchestrator/internal/review"
 )
 
 func TestGuardedMerge(t *testing.T) {
@@ -259,10 +260,10 @@ func TestGuardedMerge(t *testing.T) {
 			c := github.NewClient(server.Client())
 			c.BaseURL, _ = url.Parse(server.URL + "/")
 			// One reconciliation must be enough to merge an eligible PR; restart must not duplicate it.
-			_ = merge.Poll(context.Background(), c, []string{"owner/repo"}, "controller")
+			_ = merge.Poll(context.Background(), c, review.NewCache(), []string{"owner/repo"}, "controller")
 			if tc.name == "stale approval stays revoked when head returns" {
 				for phase = 1; phase <= 2; phase++ {
-					_ = merge.Poll(context.Background(), c, []string{"owner/repo"}, "controller")
+					_ = merge.Poll(context.Background(), c, review.NewCache(), []string{"owner/repo"}, "controller")
 				}
 			}
 			if tc.name == "stale approval stays revoked when head returns" {
@@ -281,7 +282,7 @@ func TestGuardedMerge(t *testing.T) {
 				t.Fatalf("merged=%v want %v", merged, tc.wantMerge)
 			}
 			if tc.wantMerge {
-				_ = merge.Poll(context.Background(), c, []string{"owner/repo"}, "controller")
+				_ = merge.Poll(context.Background(), c, review.NewCache(), []string{"owner/repo"}, "controller")
 				if mergeCalls != 1 {
 					t.Fatalf("merge calls %d", mergeCalls)
 				}

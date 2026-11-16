@@ -108,8 +108,10 @@ func TestVerifiedReviewEvidence(t *testing.T) {
 				}
 				return `{"number":1,"state":"open","head":{"sha":"head"},"base":{"sha":"base"},"labels":[` + labels + `]}`
 			}
+			requests := map[string]int{}
 			var server *httptest.Server
 			server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				requests[r.Method+" "+r.URL.Path]++
 				w.Header().Set("Content-Type", "application/json")
 				if r.Method == "POST" && r.URL.Path == "/repos/owner/repo/issues/1/labels" {
 					done = true
@@ -254,10 +256,13 @@ func TestVerifiedReviewEvidence(t *testing.T) {
 			if tc.name == "wrong publishing identity cannot complete" {
 				rounds = 1
 			}
+			// One cache for the process, as in the controller.
+			cache := review.NewCache()
 			for i := 0; i < rounds; i++ {
+				cache.NextPoll()
 				client := github.NewClient(server.Client())
 				client.BaseURL, _ = url.Parse(server.URL + "/")
-				if err := review.Poll(context.Background(), client, []string{"owner/repo"}, tc.actor); err != nil && tc.name != "wrong publishing identity cannot complete" {
+				if err := review.Poll(context.Background(), client, cache, []string{"owner/repo"}, tc.actor); err != nil && tc.name != "wrong publishing identity cannot complete" {
 					t.Fatal(err)
 				}
 				if done != tc.wantDone {
@@ -271,6 +276,38 @@ func TestVerifiedReviewEvidence(t *testing.T) {
 				t.Fatalf("status comments=%d want 1", posts)
 			}
 			if tc.name == "complete published review survives restart" {
+				// Two polls, each evaluating twice, download every artifact once.
+				for _, file := range []string{"identity.json", "ocr-result.json", "publication.json"} {
+					if got := requests["GET /download/"+file]; got != 1 {
+						t.Fatalf("%s downloaded %d times, want 1", file, got)
+					}
+				}
+				// Checks within one poll share an evaluation; the next poll evaluates again.
+				client := github.NewClient(server.Client())
+				client.BaseURL, _ = url.Parse(server.URL + "/")
+				listed, _, err := client.PullRequests.Get(context.Background(), "owner", "repo", 1)
+				if err != nil {
+					t.Fatal(err)
+				}
+				const runs = "GET /repos/owner/repo/actions/workflows/8/runs"
+				cache.NextPoll()
+				before := requests[runs]
+				for range 2 {
+					complete, err := review.Complete(context.Background(), client, cache, "owner", "repo", listed, tc.actor)
+					if err != nil || !complete {
+						t.Fatalf("Complete() = %v, %v", complete, err)
+					}
+				}
+				if got := requests[runs] - before; got != 1 {
+					t.Fatalf("two checks in one poll evaluated %d times, want 1", got)
+				}
+				cache.NextPoll()
+				if _, err := review.Complete(context.Background(), client, cache, "owner", "repo", listed, tc.actor); err != nil {
+					t.Fatal(err)
+				}
+				if got := requests[runs] - before; got != 2 {
+					t.Fatalf("next poll evaluated %d times in total, want 2", got)
+				}
 				want, err := os.ReadFile("testdata/complete.golden")
 				if err != nil {
 					t.Fatal(err)

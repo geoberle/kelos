@@ -23,6 +23,7 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 
 	"github.com/hearthctl/kelos-orchestrator/internal/editor"
+	"github.com/hearthctl/kelos-orchestrator/internal/review"
 )
 
 func TestCurrentFindingsCreateRetainedTask(t *testing.T) {
@@ -102,6 +103,12 @@ func TestCurrentFindingsCreateRetainedTask(t *testing.T) {
 					return
 				}
 
+				if r.Method == "PATCH" && strings.HasPrefix(r.URL.Path, "/apis/kelos.dev/v1alpha2/namespaces/agents/tasks/") {
+					// The controller marks a Task whose result it has recorded.
+					task["metadata"].(map[string]any)["annotations"].(map[string]any)["orchestrator.kelos.dev/result-recorded"] = "true"
+					_ = json.NewEncoder(w).Encode(task)
+					return
+				}
 				if r.URL.Path == "/apis/kelos.dev/v1alpha2/namespaces/agents/tasks" {
 					if r.Method == "POST" {
 						creates++
@@ -258,7 +265,7 @@ func TestCurrentFindingsCreateRetainedTask(t *testing.T) {
 						}
 					}
 				}
-				err = editor.Poll(context.Background(), client, kube, []string{"owner/repo"}, editor.Config{Namespace: "agents", Workspaces: map[string]string{"owner/repo": "repo", "other/repo": "other"}, AgentConfig: "editor", Secret: "codex"}, "controller")
+				err = editor.Poll(context.Background(), client, review.NewCache(), kube, []string{"owner/repo"}, editor.Config{Namespace: "agents", Workspaces: map[string]string{"owner/repo": "repo", "other/repo": "other"}, AgentConfig: "editor", Secret: "codex"}, "controller")
 				if (err != nil) != (tc.ambiguous || (tc.limit && poll > 0)) {
 					t.Fatalf("unexpected error: %v", err)
 				}
