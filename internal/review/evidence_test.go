@@ -42,6 +42,7 @@ func TestVerifiedReviewEvidence(t *testing.T) {
 		{"expired artifact cannot complete", 0, false, "", "", false, 2, "controller"},
 		{"wrong PR identity cannot complete", 0, false, "", "", false, 2, "controller"},
 		{"new workflow run invalidates completion", 0, false, "", "", false, 2, "controller"},
+		{"skipped workflow run does not invalidate completion", 0, true, "", "", false, 2, "controller"},
 		{"wrong publishing identity cannot complete", 0, false, "", "", false, 2, "controller"},
 		{"partial cannot complete", 0, false, `"complete"`, `"partial"`, false, 2, "controller"},
 		{"skipped cannot complete", 0, false, `"complete"`, `"skipped"`, false, 2, "controller"},
@@ -190,6 +191,9 @@ func TestVerifiedReviewEvidence(t *testing.T) {
 				}
 				if tc.name == "unrelated missing identity does not starve PR" && r.URL.Path == "/repos/owner/repo/actions/workflows/8/runs" {
 					body = strings.Replace(body, `"workflow_runs":[`, `"workflow_runs":[{"id":11,"workflow_id":8,"path":".github/workflows/ocr.yml","event":"pull_request_target","pull_requests":[{"number":2}]},`, 1)
+				}
+				if tc.name == "skipped workflow run does not invalidate completion" && r.URL.Path == "/repos/owner/repo/actions/workflows/8/runs" {
+					body = strings.Replace(body, `"workflow_runs":[`, `"workflow_runs":[{"id":11,"workflow_id":8,"path":".github/workflows/ocr.yml","event":"pull_request_target","run_attempt":1,"status":"completed","conclusion":"skipped","pull_requests":[{"number":1}]},`, 1)
 				}
 				if tc.name == "expired artifact cannot complete" && r.URL.Path == "/repos/owner/repo/actions/runs/10/artifacts" {
 					body = strings.ReplaceAll(body, `"id":1,`, `"id":1,"expired":true,`)
