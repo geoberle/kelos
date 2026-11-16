@@ -179,6 +179,9 @@ func reconcile(ctx context.Context, c *github.Client, cache *Cache, owner, repo 
 	if err != nil {
 		return err
 	}
+	if decision.Waiting {
+		return nil
+	}
 	if !decision.Complete {
 		if err := withdraw(); err != nil {
 			return err
@@ -262,6 +265,9 @@ func reconcile(ctx context.Context, c *github.Client, cache *Cache, owner, repo 
 	if err != nil {
 		return err
 	}
+	if latest.Waiting {
+		return nil
+	}
 	if !latest.Complete || latest.Evidence.Run != decision.Evidence.Run || latest.Evidence.Attempt != decision.Evidence.Attempt {
 		return withdraw()
 	}
@@ -296,8 +302,15 @@ func reconcile(ctx context.Context, c *github.Client, cache *Cache, owner, repo 
 type outcome struct {
 	Reason   string
 	Complete bool
+	// Waiting means a review workflow run for the PR has not finished, so
+	// the review is neither complete nor incomplete yet.
+	Waiting  bool
 	Evidence *Evidence
 }
+
+// ErrWaiting reports that a review workflow run for the PR has not finished.
+// Callers leave labels and approvals as they are and look again on the next poll.
+var ErrWaiting = errors.New("review workflow run is not finished")
 
 func evaluate(ctx context.Context, c *github.Client, cache *Cache, owner, repo string, pr *github.PullRequest, controllerLogin string) (outcome, error) {
 	workflow, _, err := c.Actions.GetWorkflowByFileName(ctx, owner, repo, "ocr.yml")
@@ -330,6 +343,12 @@ func evaluate(ctx context.Context, c *github.Client, cache *Cache, owner, repo s
 				}
 			} else if len(run.GetDisplayTitle()) > 0 && run.GetDisplayTitle() != fmt.Sprintf("OCR PR #%d", pr.GetNumber()) {
 				continue
+			}
+			// An unfinished run has no evidence yet and may still be skipped,
+			// as the one each label added by the controller triggers. Nothing
+			// can be decided, in either direction, until it finishes.
+			if run.GetStatus() != "completed" {
+				return outcome{Reason: "Waiting for the review workflow to finish.", Waiting: true}, nil
 			}
 			data, err := artifact(ctx, c, cache, owner, repo, run.GetID(), fmt.Sprintf("kelos-ocr-identity-%d-%d", run.GetID(), run.GetRunAttempt()), "identity.json")
 			if err != nil {
@@ -677,6 +696,9 @@ func CurrentEvidence(ctx context.Context, c *github.Client, cache *Cache, owner,
 // assessment starts; a label or retained status text alone is insufficient.
 func Complete(ctx context.Context, c *github.Client, cache *Cache, owner, repo string, pr *github.PullRequest, controller string) (bool, error) {
 	decision, err := cache.evaluation(ctx, c, owner, repo, pr, controller)
+	if err == nil && decision.Waiting {
+		return false, ErrWaiting
+	}
 	if err != nil || !decision.Complete {
 		return false, err
 	}
@@ -688,6 +710,9 @@ func Complete(ctx context.Context, c *github.Client, cache *Cache, owner, repo s
 // merging, which must see the state at that moment.
 func CompleteNow(ctx context.Context, c *github.Client, cache *Cache, owner, repo string, pr *github.PullRequest, controller string) (bool, error) {
 	decision, err := evaluate(ctx, c, cache, owner, repo, pr, controller)
+	if err == nil && decision.Waiting {
+		return false, ErrWaiting
+	}
 	if err != nil || !decision.Complete {
 		return false, err
 	}

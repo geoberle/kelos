@@ -47,6 +47,7 @@ func TestVerifiedReviewEvidence(t *testing.T) {
 		{"wrong PR identity cannot complete", 0, false, "", "", false, 2, "controller"},
 		{"new workflow run invalidates completion", 0, false, "", "", false, 2, "controller"},
 		{"skipped workflow run does not invalidate completion", 0, true, "", "", false, 2, "controller"},
+		{"unfinished workflow run keeps published completion", 0, true, "", "", false, 2, "controller"},
 		{"wrong publishing identity cannot complete", 0, false, "", "", false, 2, "controller"},
 		{"partial cannot complete", 0, false, `"complete"`, `"partial"`, false, 2, "controller"},
 		{"skipped cannot complete", 0, false, `"complete"`, `"skipped"`, false, 2, "controller"},
@@ -98,7 +99,8 @@ func TestVerifiedReviewEvidence(t *testing.T) {
 			}
 			runReads := 0
 			commentReads := 0
-			done := false
+			// The unfinished-run case starts from a published completion.
+			done := tc.name == "unfinished workflow run keeps published completion"
 			status := ""
 			posts := 0
 			pr := func() string {
@@ -212,6 +214,10 @@ func TestVerifiedReviewEvidence(t *testing.T) {
 				if tc.name == "unrelated missing identity does not starve PR" && r.URL.Path == "/repos/owner/repo/actions/workflows/8/runs" {
 					body = strings.Replace(body, `"workflow_runs":[`, `"workflow_runs":[{"id":11,"workflow_id":8,"path":".github/workflows/ocr.yml","event":"pull_request_target","pull_requests":[{"number":2}]},`, 1)
 				}
+				if tc.name == "unfinished workflow run keeps published completion" && r.URL.Path == "/repos/owner/repo/actions/workflows/8/runs" {
+					// A run triggered by a label is listed for a few seconds before it is skipped.
+					body = strings.Replace(body, `"workflow_runs":[`, `"workflow_runs":[{"id":11,"workflow_id":8,"path":".github/workflows/ocr.yml","event":"pull_request_target","run_attempt":1,"status":"in_progress","pull_requests":[{"number":1}]},`, 1)
+				}
 				if tc.name == "skipped workflow run does not invalidate completion" && r.URL.Path == "/repos/owner/repo/actions/workflows/8/runs" {
 					body = strings.Replace(body, `"workflow_runs":[`, `"workflow_runs":[{"id":11,"workflow_id":8,"path":".github/workflows/ocr.yml","event":"pull_request_target","run_attempt":1,"status":"completed","conclusion":"skipped","pull_requests":[{"number":1}]},`, 1)
 				}
@@ -271,6 +277,13 @@ func TestVerifiedReviewEvidence(t *testing.T) {
 			}
 			if done != tc.wantDone {
 				t.Fatalf("review-done=%v want %v; status=%s", done, tc.wantDone, status)
+			}
+			if tc.name == "unfinished workflow run keeps published completion" {
+				// Nothing is decided while the run is unfinished: no status, no label change.
+				if posts != 0 {
+					t.Fatalf("status comments=%d want 0", posts)
+				}
+				return
 			}
 			if tc.name != "new human feedback prevents completion" && posts != 1 {
 				t.Fatalf("status comments=%d want 1", posts)
