@@ -28,10 +28,16 @@ func TestCleanReviewCreatesAssessment(t *testing.T) {
 		response, state               string
 		retry, denied, edited, failed bool
 		changedHead                   bool
+		badOCR                        string
 	}{
 		{name: "clean current review creates retained assessment", state: "pending"},
 		{name: "new head during publication invalidates approval", response: `{"commit":"head","recommendation":"approve","reason":"Tested."}`, state: "invalidated", changedHead: true},
+		{name: "later failed OCR invalidates approval", response: `{"commit":"head","recommendation":"approve","reason":"Tested."}`, state: "invalidated", badOCR: "failed"},
+		{name: "later skipped OCR invalidates approval", response: `{"commit":"head","recommendation":"approve","reason":"Tested."}`, state: "invalidated", badOCR: "skipped"},
+		{name: "later partial OCR invalidates approval", response: `{"commit":"head","recommendation":"approve","reason":"Tested."}`, state: "invalidated", badOCR: "partial"},
+		{name: "later must-fix OCR invalidates approval", response: `{"commit":"head","recommendation":"approve","reason":"Tested."}`, state: "invalidated", badOCR: "must-fix"},
 		{name: "valid assessment", response: `{"commit":"head","recommendation":"approve","reason":"Small tested change."}`, state: "approve"},
+		{name: "approval survives absent review-done label", response: `{"commit":"head","recommendation":"approve","reason":"Small tested change."}`, state: "approve"},
 		{name: "needs human remains terminal", response: `{"commit":"head","recommendation":"needs-human","reason":"Migration risk."}`, state: "needs-human"},
 		{name: "malformed result remains terminal", response: `not json`, state: "malformed"},
 		{name: "stale result", response: `{"commit":"old","recommendation":"approve","reason":"Tested."}`, state: "malformed"},
@@ -79,6 +85,9 @@ func TestCleanReviewCreatesAssessment(t *testing.T) {
 			approved := false
 			pr := func() string {
 				labels := `{"name":"agent-managed"},{"name":"review-done"}`
+				if tc.name == "approval survives absent review-done label" && currentPoll >= 2 {
+					labels = `{"name":"agent-managed"}`
+				}
 				if approved {
 					labels += `,{"name":"lgtm"}`
 				}
@@ -163,7 +172,11 @@ func TestCleanReviewCreatesAssessment(t *testing.T) {
 				case "/repos/owner/repo/actions/workflows/ocr.yml":
 					body = `{"id":8}`
 				case "/repos/owner/repo/actions/workflows/8/runs":
+
 					body = `{"workflow_runs":[{"id":10,"workflow_id":8,"path":".github/workflows/ocr.yml","event":"pull_request_target","run_attempt":2,"status":"completed","conclusion":"success","pull_requests":[{"number":1}]}]}`
+					if tc.badOCR == "failed" && currentPoll >= 2 {
+						body = strings.ReplaceAll(body, "success", "failure")
+					}
 				case "/repos/owner/repo/actions/runs/10":
 					body = fmt.Sprintf(`{"id":10,"run_attempt":%d,"status":"completed","conclusion":"success"}`, 2)
 				case "/repos/owner/repo/actions/runs/11/artifacts":
@@ -180,6 +193,21 @@ func TestCleanReviewCreatesAssessment(t *testing.T) {
 					http.Redirect(w, r, server.URL+"/download/publication.json", http.StatusFound)
 					return
 				case "/download/identity.json", "/download/ocr-result.json", "/download/publication.json":
+					if len(tc.badOCR) > 0 && currentPoll >= 2 && r.URL.Path == "/download/ocr-result.json" {
+						changed := strings.ReplaceAll(string(result), `:"head"`, `:"`+sha+`"`)
+						if tc.badOCR == "must-fix" {
+							changed = strings.ReplaceAll(changed, `"comments":[]`, `"comments":[{"path":"main.go","start_line":1,"end_line":1,"content":"Must fix correctness regression.","severity":"must-fix"}]`)
+						} else {
+							changed = strings.ReplaceAll(changed, `"terminal_state":"complete"`, `"terminal_state":"`+tc.badOCR+`"`)
+						}
+						var buf bytes.Buffer
+						z := zip.NewWriter(&buf)
+						f, _ := z.Create("ocr-result.json")
+						_, _ = f.Write([]byte(changed))
+						_ = z.Close()
+						_, _ = w.Write(buf.Bytes())
+						return
+					}
 					_, _ = w.Write(archives[strings.TrimPrefix(r.URL.Path, "/download/")])
 					return
 				case "/repos/owner/repo/compare/base...head":

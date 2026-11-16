@@ -189,8 +189,11 @@ func assess(ctx context.Context, c *github.Client, k dynamic.Interface, owner, r
 		return err
 	}
 	complete, err := review.Complete(ctx, c, owner, repo, pr, controller)
-	if err != nil || !complete {
+	if err != nil {
 		return err
+	}
+	if !complete {
+		return assessmentLabel(ctx, c, owner, repo, pr.GetNumber(), controller)
 	}
 	request := int64(0)
 	for _, comment := range comments {
@@ -387,9 +390,16 @@ func automaticApproval(ctx context.Context, c *github.Client, owner, repo string
 		}
 		valid = !blocked
 	}
+	if valid {
+		complete, err := review.Complete(ctx, c, owner, repo, pr, controller)
+		if err != nil {
+			return nil, err
+		}
+		valid = complete
+	}
 	if !valid {
 		a.State = "invalidated"
-		a.Reason = "Approval invalidated by changed head, feedback or request authority."
+		a.Reason = "Approval invalidated by changed head, feedback, review evidence or request authority."
 		return nil, writeAssessments(ctx, c, owner, repo, pr.GetNumber(), controller, history, existing)
 	}
 	return existing, nil

@@ -80,31 +80,39 @@ type publication struct {
 	Failed  *int   `json:"failed"`
 }
 
-type evidence struct {
+type Evidence struct {
 	identity
-	Summary string          `json:"summary"`
-	Result  json.RawMessage `json:"result"`
+	Summary string `json:"summary"`
+	Result  Result `json:"result"`
 }
 
-type result struct {
-	Comments []struct {
-		Path     string `json:"path"`
-		Start    int    `json:"start_line"`
-		End      int    `json:"end_line"`
-		Content  string `json:"content"`
-		Severity string `json:"severity"`
-	} `json:"comments"`
+type Finding struct {
+	Path     string `json:"path"`
+	Start    int    `json:"start_line"`
+	End      int    `json:"end_line"`
+	Content  string `json:"content"`
+	Severity string `json:"severity"`
+}
+type Result struct {
+	Comments []Finding `json:"comments"`
 	Manifest struct {
 		Schema    string          `json:"schema_version"`
 		Operation string          `json:"operation"`
 		State     string          `json:"terminal_state"`
-		Failure   json.RawMessage `json:"run_failure"`
+		Failure   json.RawMessage `json:"run_failure,omitempty"`
 		Input     struct {
 			Mode string `json:"mode"`
 			Head string `json:"resolved_head"`
 			Base string `json:"resolved_base"`
 		} `json:"input"`
-		Coverage struct{ Selected, Completed, Reused, Failed, Waived, Excluded []item } `json:"coverage"`
+		Coverage struct {
+			Selected  []item `json:"selected"`
+			Completed []item `json:"completed"`
+			Reused    []item `json:"reused"`
+			Failed    []item `json:"failed"`
+			Waived    []item `json:"waived"`
+			Excluded  []item `json:"excluded"`
+		} `json:"coverage"`
 	} `json:"manifest"`
 }
 
@@ -246,7 +254,7 @@ func reconcile(ctx context.Context, c *github.Client, owner, repo string, pr *gi
 type outcome struct {
 	Reason   string
 	Complete bool
-	Evidence *evidence
+	Evidence *Evidence
 }
 
 func evaluate(ctx context.Context, c *github.Client, owner, repo string, pr *github.PullRequest) (outcome, error) {
@@ -298,7 +306,7 @@ func evaluate(ctx context.Context, c *github.Client, owner, repo string, pr *git
 			if err != nil {
 				return outcome{Reason: "Missing review artifact; manual rerun required."}, nil
 			}
-			var r result
+			var r Result
 			var fields map[string]json.RawMessage
 			if decodeEvidence(raw, &r) != nil || json.Unmarshal(raw, &fields) != nil || len(fields["comments"]) == 0 {
 				return outcome{Reason: "Malformed review artifact; manual rerun required."}, nil
@@ -339,7 +347,7 @@ func evaluate(ctx context.Context, c *github.Client, owner, repo string, pr *git
 			if len(raw) > 48000 {
 				return outcome{Reason: "Review evidence exceeds durable comment capacity; human attention required."}, nil
 			}
-			retained := &evidence{identity: id, Summary: pub.Summary, Result: json.RawMessage(raw)}
+			retained := &Evidence{identity: id, Summary: pub.Summary, Result: r}
 			cov := m.Coverage
 			if cov.Selected == nil || cov.Completed == nil || cov.Reused == nil || cov.Failed == nil || cov.Waived == nil || cov.Excluded == nil || len(cov.Selected) == 0 || len(cov.Failed)+len(cov.Waived)+len(cov.Excluded) > 0 {
 				return outcome{Reason: "Coverage incomplete or excluded; human attention required."}, nil
@@ -573,12 +581,12 @@ func decodeEvidence(data []byte, target any) error {
 
 // CurrentEvidence revalidates the trusted workflow and returns current findings.
 // Historical status comments alone cannot authorize a new editor.
-func CurrentEvidence(ctx context.Context, c *github.Client, owner, repo string, pr *github.PullRequest) ([]byte, error) {
+func CurrentEvidence(ctx context.Context, c *github.Client, owner, repo string, pr *github.PullRequest) (*Evidence, error) {
 	decision, err := evaluate(ctx, c, owner, repo, pr)
 	if err != nil || decision.Evidence == nil {
 		return nil, err
 	}
-	return json.Marshal(decision.Evidence)
+	return decision.Evidence, nil
 }
 
 // Complete revalidates the current review and durable human dispositions before

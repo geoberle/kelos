@@ -136,11 +136,14 @@ func reconcile(ctx context.Context, c *github.Client, k dynamic.Interface, confi
 	for i := range existing.Items {
 		task := &existing.Items[i]
 		phase, _, _ := unstructured.NestedString(task.Object, "status", "phase")
+		if phase == "Failed" {
+			return reportFailure(ctx, c, owner, repo, pr, task, controllerLogin, fmt.Errorf("editor execution failed"))
+		}
 		if phase != "Succeeded" {
 			return nil
 		}
 		if err := consume(ctx, c, owner, repo, pr, task, controllerLogin); err != nil {
-			return err
+			return reportFailure(ctx, c, owner, repo, pr, task, controllerLogin, err)
 		}
 		var assignment Assignment
 		if err := json.Unmarshal([]byte(task.GetAnnotations()["orchestrator.kelos.dev/assignment"]), &assignment); err != nil {
@@ -183,26 +186,8 @@ func reconcile(ctx context.Context, c *github.Client, k dynamic.Interface, confi
 		name := "editor-" + key + "-" + fmt.Sprintf("%x", sha256.Sum256(encoded))[:16]
 		return create(ctx, c, k, config, owner, repo, pr, assignment, key, name)
 	}
-	raw, err := review.CurrentEvidence(ctx, c, owner, repo, pr)
-	if err != nil || len(raw) == 0 {
-		return err
-	}
-	var evidence struct {
-		Repository string `json:"repository"`
-		PR         int    `json:"pr"`
-		Head       string `json:"head"`
-		Run        int64  `json:"run"`
-		Attempt    int    `json:"attempt"`
-		Summary    string `json:"summary"`
-		Result     struct {
-			Comments []struct {
-				Content, Path, Severity string
-				Start                   int `json:"start_line"`
-				End                     int `json:"end_line"`
-			} `json:"comments"`
-		} `json:"result"`
-	}
-	if err := json.Unmarshal(raw, &evidence); err != nil {
+	evidence, err := review.CurrentEvidence(ctx, c, owner, repo, pr)
+	if err != nil || evidence == nil {
 		return err
 	}
 	name := "editor-" + key + "-" + fmt.Sprintf("%x", sha256.Sum256([]byte(fmt.Sprintf("%s/%d/%d", evidence.Head, evidence.Run, evidence.Attempt))))[:16]
@@ -458,4 +443,27 @@ func summaryCommentID(source, owner, repo string, number int) (int64, error) {
 		return 0, fmt.Errorf("invalid OCR summary identity")
 	}
 	return id, nil
+}
+
+func reportFailure(ctx context.Context, c *github.Client, owner, repo string, pr *github.PullRequest, task *unstructured.Unstructured, controller string, cause error) error {
+	marker := "<!-- kelos-editor-failure/v1 " + task.GetName() + " -->"
+	body := marker + "\nEditor Task " + task.GetName() + " requires human attention: " + cause.Error() + ". Preserve the retained Task, workspace, commits and pending feedback. Finish corrections manually, run CI and OCR, resolve review threads, then post a fresh authorized lgtm <full SHA>. No automatic retry."
+	opts := &github.IssueListCommentsOptions{ListOptions: github.ListOptions{PerPage: 100}}
+	for {
+		comments, response, err := c.Issues.ListComments(ctx, owner, repo, pr.GetNumber(), opts)
+		if err != nil {
+			return errors.Join(cause, err)
+		}
+		for _, comment := range comments {
+			if comment.GetUser().GetLogin() == controller && strings.HasPrefix(comment.GetBody(), marker) {
+				return cause
+			}
+		}
+		if response.NextPage == 0 {
+			break
+		}
+		opts.Page = response.NextPage
+	}
+	_, _, err := c.Issues.CreateComment(ctx, owner, repo, pr.GetNumber(), &github.IssueComment{Body: &body})
+	return errors.Join(cause, err)
 }

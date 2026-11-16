@@ -22,7 +22,7 @@ func TestGuardedMerge(t *testing.T) {
 		name      string
 		wantMerge bool
 	}{
-		{"automated approval with all gates", true},
+		{"automated approval without current review", false},
 		{"approved current commit with enforced green CI", true},
 		{"private plan cannot expose protection", false},
 		{"edited approval is not reused", false},
@@ -134,6 +134,12 @@ func TestGuardedMerge(t *testing.T) {
 				}
 				var body string
 				switch r.URL.Path {
+				case "/repos/owner/repo/issues/comments/20":
+					_, _ = w.Write([]byte(`{"user":{"login":"controller"}}`))
+				case "/repos/owner/repo/actions/workflows/ocr.yml":
+					_, _ = w.Write([]byte(`{"id":8}`))
+				case "/repos/owner/repo/actions/workflows/8/runs":
+					_, _ = w.Write([]byte(`{"workflow_runs":[]}`))
 				case "/repos/owner/repo/pulls":
 					body = "[" + pr() + "]"
 				case "/repos/owner/repo/pulls/1":
@@ -144,7 +150,7 @@ func TestGuardedMerge(t *testing.T) {
 				case "/repos/owner/repo/issues/1/comments":
 					commentReads++
 					comments := append([]*github.IssueComment{}, ledger...)
-					if tc.name != "automated approval with all gates" && tc.name != "bare label is not approval" && (tc.name != "approval deleted before final check" || commentReads <= 1) {
+					if tc.name != "automated approval without current review" && tc.name != "bare label is not approval" && (tc.name != "approval deleted before final check" || commentReads <= 1) {
 						var human github.IssueComment
 						_ = json.Unmarshal([]byte(`{"id":10,"body":"lgtm `+sha+`","user":{"id":1,"login":"geoberle"},"created_at":"2026-11-15T10:00:00Z","updated_at":"2026-11-15T10:00:00Z"}`), &human)
 						if tc.name == "edited approval is not reused" {
@@ -162,7 +168,7 @@ func TestGuardedMerge(t *testing.T) {
 						_ = json.Unmarshal([]byte(`{"id":20,"body":"<!-- kelos-feedback/v1 -->\n[]","user":{"id":90,"login":"controller"},"created_at":"2026-11-15T10:01:00Z"}`), &observation)
 						comments = append(comments, &observation)
 					}
-					if tc.name == "automated approval with all gates" {
+					if tc.name == "automated approval without current review" {
 						history := fmt.Sprintf(`{"attempts":[{"task":"assessment-1","uid":"task-1","head":%q,"request":0,"started":"2026-11-15T10:00:00Z","state":"approve","reason":"Bounded and tested."}]}`, sha)
 						comments = append(comments, &github.IssueComment{ID: github.Ptr(int64(20)), Body: github.Ptr("<!-- kelos-assessment/v1 -->\n" + history), User: &github.User{ID: github.Ptr(int64(90)), Login: github.Ptr("controller")}})
 					}
