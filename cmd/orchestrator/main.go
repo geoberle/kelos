@@ -32,7 +32,7 @@ func main() {
 		return completed.Run(command.Context(), logger)
 	}}
 	command.Flags().StringVar(&raw.ConfigFile, "config-file", "", "Versioned configuration JSON")
-	command.Flags().StringVar(&raw.TokenFile, "token-file", "", "GitHub credential file")
+	command.Flags().StringVar(&raw.AppCredentialDir, "app-credential-dir", "", "Directory holding the GitHub App appID, installationID and privateKey files")
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 	if err := command.ExecuteContext(ctx); err != nil {

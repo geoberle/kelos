@@ -30,11 +30,12 @@ Example configuration (the repository is explicitly selected by the operator):
 {"version":"v1","repositories":["geoberle/kelos"],"pollInterval":"1m"}
 ```
 
-Run `orchestrator --config-file=config.json --token-file=/credential/token`.
+Run `orchestrator --config-file=config.json --app-credential-dir=/credential`.
 Validation precedes reading credentials or constructing the GitHub client.
-Credentials are read at startup: restart the Deployment after credential rotation.
-The Helm chart references an existing Secret named by `credentialSecret`, with a
-`token` key. Do not put credentials in values or source control. Configure
+The orchestrator authenticates as a GitHub App installation and renews its
+tokens itself; the app key is read at startup, so restart the Deployment after
+rotating it. The Helm chart references an existing Secret named by
+`credentialSecret`, with `appID`, `installationID` and `privateKey` keys. Do not put credentials in values or source control. Configure
 `imagePullSecrets` for private GHCR access. No Service or inbound listener exists.
 
 `make fmt`, `make fmt-check`, `make lint`, `make lint-fix`, `make test`, `make build`,

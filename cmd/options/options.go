@@ -6,10 +6,13 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
+	"github.com/bradleyfalzon/ghinstallation/v2"
 	"github.com/go-logr/logr"
 	"github.com/google/go-github/v80/github"
 	"k8s.io/client-go/dynamic"
@@ -22,8 +25,8 @@ import (
 )
 
 type RawOptions struct {
-	ConfigFile string
-	TokenFile  string
+	ConfigFile       string
+	AppCredentialDir string
 }
 type configuration struct {
 	Assessment      *merge.AssessmentConfig `json:"assessment,omitempty"`
@@ -35,9 +38,9 @@ type configuration struct {
 	ControllerLogin string                  `json:"controllerLogin,omitempty"`
 }
 type validatedOptions struct {
-	config    configuration
-	interval  time.Duration
-	tokenFile string
+	config           configuration
+	interval         time.Duration
+	appCredentialDir string
 }
 type ValidatedOptions struct{ *validatedOptions }
 type completedOptions struct {
@@ -49,8 +52,8 @@ type completedOptions struct {
 type Options struct{ *completedOptions }
 
 func (o *RawOptions) Validate() (*ValidatedOptions, error) {
-	if len(o.ConfigFile) == 0 || len(o.TokenFile) == 0 {
-		return nil, fmt.Errorf("config-file and token-file are required")
+	if len(o.ConfigFile) == 0 || len(o.AppCredentialDir) == 0 {
+		return nil, fmt.Errorf("config-file and app-credential-dir are required")
 	}
 	data, err := os.ReadFile(o.ConfigFile)
 	if err != nil {
@@ -87,18 +90,27 @@ func (o *RawOptions) Validate() (*ValidatedOptions, error) {
 	if err != nil || interval < time.Second {
 		return nil, fmt.Errorf("pollInterval must be at least 1s")
 	}
-	return &ValidatedOptions{&validatedOptions{config: config, interval: interval, tokenFile: o.TokenFile}}, nil
+	return &ValidatedOptions{&validatedOptions{config: config, interval: interval, appCredentialDir: o.AppCredentialDir}}, nil
 }
 func (o *ValidatedOptions) Complete() (*Options, error) {
-	token, err := os.ReadFile(o.tokenFile)
+	ids := map[string]int64{}
+	for _, name := range []string{"appID", "installationID"} {
+		value, err := os.ReadFile(filepath.Join(o.appCredentialDir, name))
+		if err != nil {
+			return nil, err
+		}
+		id, err := strconv.ParseInt(strings.TrimSpace(string(value)), 10, 64)
+		if err != nil {
+			return nil, fmt.Errorf("%s must be a number: %w", name, err)
+		}
+		ids[name] = id
+	}
+	// The transport mints installation tokens and renews them before expiry.
+	transport, err := ghinstallation.NewKeyFromFile(http.DefaultTransport, ids["appID"], ids["installationID"], filepath.Join(o.appCredentialDir, "privateKey"))
 	if err != nil {
 		return nil, err
 	}
-	value := strings.TrimSpace(string(token))
-	if len(value) == 0 {
-		return nil, fmt.Errorf("empty token file")
-	}
-	client := github.NewClient(&http.Client{Timeout: 30 * time.Second}).WithAuthToken(value)
+	client := github.NewClient(&http.Client{Transport: transport, Timeout: 30 * time.Second})
 	var kube dynamic.Interface
 	if o.config.Editor != nil || o.config.Assessment != nil {
 		config, err := rest.InClusterConfig()
