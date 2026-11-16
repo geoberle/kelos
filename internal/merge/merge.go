@@ -235,12 +235,13 @@ func authorize(ctx context.Context, c *github.Client, cache *review.Cache, owner
 		}
 		if valid {
 			// The command names no commit, so the head must demonstrably
-			// predate it; a push after the approval is not approved.
-			seen, err := headSeenBefore(ctx, c, owner, repo, pr, source.GetCreatedAt().Time)
+			// have been the head when it was written; a push after the
+			// approval is not approved.
+			since, err := headSince(ctx, c, owner, repo, pr, source.GetCreatedAt().Time)
 			if err != nil {
 				return nil, err
 			}
-			valid = seen
+			valid = since
 		}
 		record.Invalidated = !valid
 		encoded, err := json.Marshal(record)
@@ -284,28 +285,24 @@ func isApproval(body string) bool {
 	return strings.TrimSpace(body) == "/lgtm"
 }
 
-// headSeenBefore reports whether the PR head was on its branch before the
-// given time. GitHub does not expose when a commit was pushed, but it creates
-// a check suite for the branch as soon as a workflow reacts to the push, so
-// the earliest suite marks the moment the head became reviewable. Without
-// such a suite nothing is proven and the answer is no.
-func headSeenBefore(ctx context.Context, c *github.Client, owner, repo string, pr *github.PullRequest, at time.Time) (bool, error) {
-	opts := &github.ListCheckSuiteOptions{ListOptions: github.ListOptions{PerPage: 100}}
-	for {
-		suites, res, err := c.Checks.ListCheckSuitesForRef(ctx, owner, repo, pr.GetHead().GetSHA(), opts)
-		if err != nil {
-			return false, err
-		}
-		for _, suite := range suites.CheckSuites {
-			if suite.GetHeadBranch() == pr.GetHead().GetRef() && !suite.GetCreatedAt().IsZero() && suite.GetCreatedAt().Before(at) {
-				return true, nil
-			}
-		}
-		if res.NextPage == 0 {
-			return false, nil
-		}
-		opts.Page = res.NextPage
+// headSince reports whether the PR head has been the tip of its branch since
+// before the given time. GitHub's push log for the branch lists every update
+// with its time; the newest entry must have put the head there, and earlier
+// than at. A branch in another repository has no log here and is refused.
+func headSince(ctx context.Context, c *github.Client, owner, repo string, pr *github.PullRequest, at time.Time) (bool, error) {
+	if pr.GetHead().GetRepo().GetFullName() != owner+"/"+repo || len(pr.GetHead().GetRef()) == 0 {
+		return false, nil
 	}
+	// Newest first is the default order.
+	activities, _, err := c.Repositories.ListRepositoryActivities(ctx, owner, repo, &github.ListRepositoryActivityOptions{Ref: "refs/heads/" + pr.GetHead().GetRef(), PerPage: 1})
+	if err != nil {
+		return false, err
+	}
+	if len(activities) == 0 {
+		return false, nil
+	}
+	newest := activities[0]
+	return newest.After == pr.GetHead().GetSHA() && !newest.Timestamp.IsZero() && newest.Timestamp.Before(at), nil
 }
 
 func laterReviewOrPush(ctx context.Context, c *github.Client, owner, repo string, number int, approved time.Time) (bool, error) {

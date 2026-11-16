@@ -193,13 +193,13 @@ func assess(ctx context.Context, c *github.Client, cache *review.Cache, k dynami
 	if !complete {
 		return assessmentLabel(ctx, c, cache, owner, repo, pr.GetNumber(), controller)
 	}
-	// A request answers the latest assessment of the current head, so it must
-	// be newer than that attempt. A new head is assessed without a request.
+	// A request answers the latest assessment, and only while that assessment
+	// is of the current head; it must be newer than that attempt. A request
+	// made for another head never counts, also when the branch returns to
+	// this one. A new head is assessed without a request.
 	var assessed time.Time
-	for _, a := range history.Attempts {
-		if a.Head == pr.GetHead().GetSHA() {
-			assessed = a.Started
-		}
+	if n := len(history.Attempts); n > 0 && history.Attempts[n-1].Head == pr.GetHead().GetSHA() {
+		assessed = history.Attempts[n-1].Started
 	}
 	request := int64(0)
 	for _, comment := range comments {
