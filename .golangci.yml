@@ -1,0 +1,17 @@
+version: "2"
+run:
+  timeout: 5m
+linters:
+  default: none
+  enable: [errcheck, forbidigo, govet, importas, ineffassign, staticcheck, unused]
+  settings:
+    forbidigo:
+      forbid:
+        - pattern: '^log\.'
+          msg: use logr
+formatters:
+  enable: [gci, gofmt]
+  settings:
+    gci:
+      custom-order: true
+      sections: [standard, default, 'prefix(github.com/hearthctl/kelos-orchestrator)']
