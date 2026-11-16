@@ -42,7 +42,7 @@ remain live acceptance checks.
 Create `kelos-system` for the controller and `kelos-agents` for the resources.
 Provision Secrets in `kelos-agents` through the deployment's secret manager:
 
-- `kelos-github`: PAT key `token`, or GitHub App keys `appID`, `installationID`,
+- `kelos-github`: PAT key `GITHUB_TOKEN`, or GitHub App keys `appID`, `installationID`,
   `privateKey` per upstream Workspace documentation. Restrict to the configured
   repository; grant contents and pull requests write, issues write for enrollment
   and status comments, and metadata read. Validate actual permissions in a test
