@@ -1,0 +1,32 @@
+# Official OCI chart 0.64.0; provenance and chart digest in README.md.
+crds:
+  install: true
+  keep: true
+# Empty shared suffix preserves the full digest references below.
+image:
+  tag: ""
+telemetry:
+  enabled: false
+controller:
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: '1'
+      memory: 512Mi
+spawner:
+  image: ghcr.io/kelos-dev/kelos-spawner:v0.64.0@sha256:b56d2607ad10202774e2ba69e8280bade610c34b24f1bc8d8050ebc691196a20
+  resources:
+    requests: cpu=100m,memory=128Mi
+    limits: cpu=500m,memory=256Mi
+consoleServer:
+  enabled: false
+slackServer:
+  enabled: false
+controllerImage: ghcr.io/kelos-dev/kelos-controller:v0.64.0@sha256:8b2d9a54ccffa7bd883d8002ce9423110d161d79dde487f634b1f4da6580115f
+codexImage: ghcr.io/kelos-dev/codex:v0.64.0@sha256:3edc0f857addc5967a87cb21e24e9acf8fdd71e16e75a58cd5c3f9c4514a2f14
+workerRunner:
+  image: ghcr.io/kelos-dev/kelos-worker-runner:v0.64.0@sha256:e4b669c1b70a191d0f97e166e524e9451dee5ec6282fb60106b741e9103da26f
+sessionRuntime:
+  image: ghcr.io/kelos-dev/kelos-session-runtime:v0.64.0@sha256:ebe69fcb60ba3d32662c2016f54a509439130e8c0076bdf02c8b208be9ca34d0
