@@ -25,6 +25,10 @@ import (
 	"github.com/hearthctl/kelos-orchestrator/internal/review"
 )
 
+// cacheLifetime is how long cached GitHub responses are kept before the cache
+// is emptied; refilling it costs about one poll's worth of counted requests.
+const cacheLifetime = 24 * time.Hour
+
 type RawOptions struct {
 	ConfigFile       string
 	AppCredentialDir string
@@ -150,7 +154,12 @@ func (o *Options) Run(ctx context.Context, logger logr.Logger) error {
 	if o.config.Implementation != nil {
 		runCommandAuthor = o.config.ControllerLogin
 	}
+	forgotten := time.Now()
 	for {
+		if time.Since(forgotten) >= cacheLifetime {
+			o.meter.forget()
+			forgotten = time.Now()
+		}
 		o.reviews.NextPoll()
 		if err := admission.Poll(ctx, o.client, o.config.Repositories, runCommandAuthor); err != nil {
 			logger.Error(err, "Admission poll failed")

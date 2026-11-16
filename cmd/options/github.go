@@ -13,10 +13,9 @@ import (
 // does not count against the rate limit. base performs the authenticated
 // request.
 func newHTTPClient(base http.RoundTripper) (*http.Client, *meter) {
-	m := &meter{base: base}
-	cache := httpcache.NewMemoryCacheTransport()
-	cache.Transport = m
-	return &http.Client{Transport: revalidate{cache}, Timeout: 30 * time.Second}, m
+	m := &meter{base: base, cache: httpcache.NewMemoryCacheTransport()}
+	m.cache.Transport = m
+	return &http.Client{Transport: revalidate{m.cache}, Timeout: 30 * time.Second}, m
 }
 
 // revalidate makes the cache ask GitHub on every use. GitHub permits reusing
@@ -30,9 +29,10 @@ func (r revalidate) RoundTrip(request *http.Request) (*http.Response, error) {
 	return r.next.RoundTrip(request)
 }
 
-// meter counts what one poll costs.
+// meter counts what one poll costs and owns the response cache.
 type meter struct {
-	base http.RoundTripper
+	base  http.RoundTripper
+	cache *httpcache.Transport
 
 	lock        sync.Mutex
 	requests    int
@@ -64,4 +64,12 @@ func (m *meter) reset() (requests, notModified int, remaining string) {
 	requests, notModified = m.requests, m.notModified
 	m.requests, m.notModified = 0, 0
 	return requests, notModified, m.remaining
+}
+
+// forget drops every cached response. The cache has no eviction, so it would
+// otherwise keep answers for closed pull requests and old runs forever. The
+// next read of each resource counts against the rate limit once. It must not
+// be called while a request is in flight.
+func (m *meter) forget() {
+	m.cache.Cache = httpcache.NewMemoryCache()
 }

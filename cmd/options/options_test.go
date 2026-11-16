@@ -198,4 +198,15 @@ func TestGitHubClientRevalidatesRepeatedReads(t *testing.T) {
 	if requests, notModified, _ := meter.reset(); requests != 0 || notModified != 0 {
 		t.Fatalf("meter after reset = %d requests, %d not modified; want 0, 0", requests, notModified)
 	}
+
+	// A forgotten cache has no validator to send, so the read is paid in full.
+	meter.forget()
+	response, err := client.Get(server.URL + "/repos/owner/repo/pulls/1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = response.Body.Close()
+	if last := validators[len(validators)-1]; len(last) != 0 {
+		t.Fatalf("validator sent after forgetting = %q, want none", last)
+	}
 }

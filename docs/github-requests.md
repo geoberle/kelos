@@ -12,9 +12,9 @@ does not count against the rate limit. GitHub would permit reusing a response
 for a minute; the controller revalidates on every use instead, because it reads
 back what it just wrote and must not act on a stale answer.
 
-The cache lives in the process and is never pruned. It holds one response per
-URL, so it grows with the pull requests, issues and workflow runs seen since
-the last restart.
+The cache lives in the process and holds one response per URL, so it grows
+with the pull requests, issues and workflow runs seen. It has no eviction; the
+controller empties it once a day. The poll after that pays for every read once.
 
 ## Work done once
 
