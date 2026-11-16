@@ -14,6 +14,13 @@ func gates(ctx context.Context, c *github.Client, owner, repo string, pr *github
 	if pr.GetState() != "open" || pr.GetDraft() || pr.GetMerged() || !label(pr, "agent-managed") || label(pr, "hold") || !pr.GetMergeable() || pr.GetMergeableState() != "clean" {
 		return fmt.Errorf("PR is not ready to merge")
 	}
+	if err := requiredCI(ctx, c, owner, repo, pr); err != nil {
+		return err
+	}
+	return resolvedThreads(ctx, c, owner, repo, pr.GetNumber())
+}
+
+func requiredCI(ctx context.Context, c *github.Client, owner, repo string, pr *github.PullRequest) error {
 	branch := pr.GetBase().GetRef()
 	if len(branch) == 0 {
 		return fmt.Errorf("missing target branch")
@@ -111,7 +118,7 @@ func gates(ctx context.Context, c *github.Client, owner, repo string, pr *github
 			return fmt.Errorf("required check %s is missing", name)
 		}
 	}
-	return resolvedThreads(ctx, c, owner, repo, pr.GetNumber())
+	return nil
 }
 
 func resolvedThreads(ctx context.Context, c *github.Client, owner, repo string, number int) error {

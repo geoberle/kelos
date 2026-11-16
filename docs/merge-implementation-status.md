@@ -1,6 +1,6 @@
 # Commit-bound human merging
 
-`internal/merge.Poll` implements the human approval path. Runtime execution is
+`internal/merge.Poll` implements shared human and automated approval gates. Runtime execution is
 opt-in through `configuration.mergeEnabled: true` and requires the dedicated
 `controllerLogin`. The chart leaves merging disabled until repository enforcement
 and credentials have been validated. No live merge has been performed during implementation.
@@ -61,7 +61,7 @@ longer return the plan-related 403: `main` returns “Branch not protected” an
 effective rules list is empty. Live merge acceptance still requires configured
 required CI and merge enforcement. The separate `agent/**` rule protects editor
 branches against force pushes and deletion, including administrators. The automated-assessment source
-of approval is implemented by issue #9 and must use this same gate contract.
+of approval uses this same gate contract; see [assessment](assessment.md).
 
 References: [branch protection API](https://docs.github.com/en/rest/branches/branch-protection),
 [effective rules](https://docs.github.com/en/rest/repos/rules#get-rules-for-a-branch),

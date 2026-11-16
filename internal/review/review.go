@@ -580,3 +580,14 @@ func CurrentEvidence(ctx context.Context, c *github.Client, owner, repo string, 
 	}
 	return json.Marshal(decision.Evidence)
 }
+
+// Complete revalidates the current review and durable human dispositions before
+// an assessment starts. A label or retained status text alone is insufficient.
+func Complete(ctx context.Context, c *github.Client, owner, repo string, pr *github.PullRequest, controller string) (bool, error) {
+	decision, err := evaluate(ctx, c, owner, repo, pr)
+	if err != nil || !decision.Complete {
+		return false, err
+	}
+	pending, err := feedback.Pending(ctx, c, owner, repo, pr.GetNumber(), pr.GetHead().GetSHA(), controller)
+	return err == nil && len(pending) == 0, err
+}

@@ -26,12 +26,13 @@ type RawOptions struct {
 	TokenFile  string
 }
 type configuration struct {
-	MergeEnabled    bool           `json:"mergeEnabled,omitempty"`
-	Editor          *editor.Config `json:"editor,omitempty"`
-	Version         string         `json:"version"`
-	Repositories    []string       `json:"repositories"`
-	PollInterval    string         `json:"pollInterval"`
-	ControllerLogin string         `json:"controllerLogin,omitempty"`
+	Assessment      *merge.AssessmentConfig `json:"assessment,omitempty"`
+	MergeEnabled    bool                    `json:"mergeEnabled,omitempty"`
+	Editor          *editor.Config          `json:"editor,omitempty"`
+	Version         string                  `json:"version"`
+	Repositories    []string                `json:"repositories"`
+	PollInterval    string                  `json:"pollInterval"`
+	ControllerLogin string                  `json:"controllerLogin,omitempty"`
 }
 type validatedOptions struct {
 	config    configuration
@@ -79,6 +80,9 @@ func (o *RawOptions) Validate() (*ValidatedOptions, error) {
 	if config.Editor != nil && (len(config.Editor.Namespace) == 0 || len(config.Editor.Workspace) == 0 || len(config.Editor.AgentConfig) == 0 || len(config.Editor.Secret) == 0 || len(config.ControllerLogin) == 0) {
 		return nil, fmt.Errorf("editor requires namespace, workspace, agentConfig, secret and controllerLogin")
 	}
+	if config.Assessment != nil && (len(config.Assessment.Namespace) == 0 || len(config.Assessment.Workspace) == 0 || len(config.Assessment.AgentConfig) == 0 || len(config.Assessment.Secret) == 0 || len(config.ControllerLogin) == 0) {
+		return nil, fmt.Errorf("assessment requires namespace, read-only workspace, agentConfig, secret and controllerLogin")
+	}
 	interval, err := time.ParseDuration(config.PollInterval)
 	if err != nil || interval < time.Second {
 		return nil, fmt.Errorf("pollInterval must be at least 1s")
@@ -96,7 +100,7 @@ func (o *ValidatedOptions) Complete() (*Options, error) {
 	}
 	client := github.NewClient(&http.Client{Timeout: 30 * time.Second}).WithAuthToken(value)
 	var kube dynamic.Interface
-	if o.config.Editor != nil {
+	if o.config.Editor != nil || o.config.Assessment != nil {
 		config, err := rest.InClusterConfig()
 		if err != nil {
 			return nil, err
@@ -123,6 +127,11 @@ func (o *Options) Run(ctx context.Context, logger logr.Logger) error {
 		if o.config.Editor != nil {
 			if err := editor.Poll(ctx, o.client, o.kubernetes, o.config.Repositories, *o.config.Editor, o.config.ControllerLogin); err != nil {
 				logger.Error(err, "Editor poll failed")
+			}
+		}
+		if o.config.Assessment != nil {
+			if err := merge.Assess(ctx, o.client, o.kubernetes, o.config.Repositories, *o.config.Assessment, o.config.ControllerLogin); err != nil {
+				logger.Error(err, "Assessment poll failed")
 			}
 		}
 		if o.config.MergeEnabled {

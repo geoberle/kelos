@@ -209,6 +209,14 @@ func authorize(ctx context.Context, c *github.Client, owner, repo string, pr *gi
 			}
 		}
 		if valid {
+			for _, comment := range comments {
+				if comment.GetUser().GetID() == user.GetID() && strings.HasPrefix(comment.GetBody(), "<!-- kelos-feedback/v1 -->") && (comment.GetCreatedAt().IsZero() || !comment.GetCreatedAt().Before(source.GetCreatedAt().Time)) {
+					valid = false
+					break
+				}
+			}
+		}
+		if valid {
 			blocked, err := laterReviewOrPush(ctx, c, owner, repo, pr.GetNumber(), source.GetCreatedAt().Time)
 			if err != nil {
 				return nil, err
@@ -238,7 +246,7 @@ func authorize(ctx context.Context, c *github.Client, owner, repo string, pr *gi
 		}
 	}
 	if selected == nil {
-		return nil, nil
+		return automaticApproval(ctx, c, owner, repo, pr, controller, comments)
 	}
 	permission, _, err := c.Repositories.GetPermissionLevel(ctx, owner, repo, "geoberle")
 	if err != nil {

@@ -18,3 +18,5 @@ resources:
     memory: 32Mi
   limits:
     memory: 128Mi
+
+# configuration.assessment: {namespace: kelos-agents, workspace: read-only-repo, agentConfig: assessment, secret: kelos-openai}

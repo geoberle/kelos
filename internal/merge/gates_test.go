@@ -22,11 +22,12 @@ func TestGuardedMerge(t *testing.T) {
 		name      string
 		wantMerge bool
 	}{
+		{"automated approval with all gates", true},
 		{"approved current commit with enforced green CI", true},
 		{"private plan cannot expose protection", false},
 		{"edited approval is not reused", false},
 		{"approval deleted before final check", false},
-		{"new human feedback before final check", false},
+		{"new human feedback before final check", false}, {"retained deleted feedback invalidates approval", false},
 		{"force push after approval invalidates it", false},
 		{"human role revoked", false},
 		{"ambiguous successful merge is recovered", true},
@@ -143,7 +144,7 @@ func TestGuardedMerge(t *testing.T) {
 				case "/repos/owner/repo/issues/1/comments":
 					commentReads++
 					comments := append([]*github.IssueComment{}, ledger...)
-					if tc.name != "bare label is not approval" && (tc.name != "approval deleted before final check" || commentReads <= 1) {
+					if tc.name != "automated approval with all gates" && tc.name != "bare label is not approval" && (tc.name != "approval deleted before final check" || commentReads <= 1) {
 						var human github.IssueComment
 						_ = json.Unmarshal([]byte(`{"id":10,"body":"lgtm `+sha+`","user":{"id":1,"login":"geoberle"},"created_at":"2026-11-15T10:00:00Z","updated_at":"2026-11-15T10:00:00Z"}`), &human)
 						if tc.name == "edited approval is not reused" {
@@ -155,6 +156,15 @@ func TestGuardedMerge(t *testing.T) {
 						var feedback github.IssueComment
 						_ = json.Unmarshal([]byte(`{"id":11,"body":"Please fix this","user":{"login":"geoberle"},"created_at":"2026-11-15T10:01:00Z","updated_at":"2026-11-15T10:01:00Z"}`), &feedback)
 						comments = append(comments, &feedback)
+					}
+					if tc.name == "retained deleted feedback invalidates approval" {
+						var observation github.IssueComment
+						_ = json.Unmarshal([]byte(`{"id":20,"body":"<!-- kelos-feedback/v1 -->\n[]","user":{"id":90,"login":"controller"},"created_at":"2026-11-15T10:01:00Z"}`), &observation)
+						comments = append(comments, &observation)
+					}
+					if tc.name == "automated approval with all gates" {
+						history := fmt.Sprintf(`{"attempts":[{"task":"assessment-1","uid":"task-1","head":%q,"request":0,"started":"2026-11-15T10:00:00Z","state":"approve","reason":"Bounded and tested."}]}`, sha)
+						comments = append(comments, &github.IssueComment{ID: github.Ptr(int64(20)), Body: github.Ptr("<!-- kelos-assessment/v1 -->\n" + history), User: &github.User{ID: github.Ptr(int64(90)), Login: github.Ptr("controller")}})
 					}
 					b, _ := json.Marshal(comments)
 					body = string(b)
