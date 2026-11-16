@@ -1,6 +1,6 @@
-# Native implementation execution
+# Native Kelos execution prerequisites
 
-This configuration implements issue #3's deployment slice. It is not a completed
+This configuration supplies native execution prerequisites for issues #3/#6/#9. It is not a completed
 live deployment. Only `geoberle/kelos` is configured; keep the Go admission
 allowlist identical. The spawner starts suspended. No Go runtime changes are made.
 
@@ -51,7 +51,7 @@ Provision Secrets in `kelos-agents` through the deployment's secret manager:
 - `kelos-openai`: key `CODEX_API_KEY`. Confirm access to the configured Codex
   model before activation. Never put credential values in Helm values or git.
 
-Initial values: one editor, 60-second discovery, Codex gpt-5.4/high, worker
+Implementation spawner values: one concurrent implementation Task, 60-second discovery, Codex gpt-5.4/high, worker
 requests 1 CPU/2Gi and limits 4 CPU/8Gi. These are starting settings requiring
 cluster capacity and model-access validation. Workspace is a per-Task checkout;
 there is no durable PVC configured. Preserve failed worker Pods/logs and recover
@@ -116,3 +116,67 @@ runtime missing-Secret/image-pull failures. Live credentials, API validation,
 repeat-poll/restart behavior, LLM implementation, PR enrollment, outbound network
 operation, OCR triggering and recovery have not been demonstrated. Helm rendering
 is not evidence for these acceptance criteria.
+
+## Go-created editor and assessment Tasks
+
+All references below are in `kelos-agents`. Merge this fragment into the Go
+orchestrator chart values only when execution is intended; configuring these
+sections enables scheduling independently of the suspended implementation spawner.
+Replace the controller login with the actual dedicated controller identity.
+
+```yaml
+configuration:
+  repositories: [geoberle/kelos]
+  controllerLogin: REPLACE_WITH_DEDICATED_CONTROLLER_LOGIN
+  mergeEnabled: false
+  editor:
+    namespace: kelos-agents
+    workspace: geoberle-kelos
+    agentConfig: kelos-editor
+    secret: kelos-openai
+  assessment:
+    namespace: kelos-agents
+    workspace: geoberle-kelos-assessment
+    agentConfig: kelos-assessment
+    secret: kelos-openai
+```
+
+`secret` is the Codex API-key Secret, not the GitHub credential. Provision the
+separate `kelos-github-assessment` Secret with key `GITHUB_TOKEN`: a
+repository-scoped credential with contents, pull requests and metadata read
+only, and no write permissions. The Workspace has no read-only switch; GitHub
+permissions enforce remote read-only access. Local checkout writes needed for
+checks are allowed. Never substitute the editor or controller credential.
+Keep controller credentials out of worker Pods. Verify effective permissions
+with the real credential before activation; prompt instructions are not a
+security boundary.
+
+Both Go Task constructors select Codex with API-key authentication and reference
+these AgentConfigs. Their prompts own assignment and result contracts; the
+AgentConfigs intentionally add no competing output format. See
+[editor execution](../../docs/editor-status.md) and
+[assessment execution](../../docs/assessment.md) for result validation and gates.
+
+Unlike the implementation TaskSpawner template, these Go constructors omit
+model, effort and pod resource overrides. In pinned v0.64.0, the Codex entrypoint
+passes model and effort only when supplied, leaving Codex's own defaults;
+the Job builder supplies no worker requests or limits without overrides
+(cluster admission such as LimitRange may supply them). AgentConfig cannot set
+these fields. Model access, effective runtime defaults and capacity remain an
+explicit operational consideration; the implementation gpt-5.4/high and
+1 CPU/2Gi requests do not carry over to Go-created Tasks.
+
+Before enabling scheduling, install these resources and Secrets, run one Go
+controller with its Task read/create RBAC, verify administrator-enforced classic
+branch protection forbids force pushes and deletion, and provide working OCR
+on ARC for editor pushes. Permit the outbound endpoints listed above and ensure
+the pinned worker image can run repository checks. Keep Tasks and recoverable
+worker evidence; no TTL is introduced.
+
+Remaining live acceptance: server-side CR admission and reference resolution,
+Secret permissions (including denied assessment writes), image pulls, Codex
+authentication and effective defaults, editor result capture and protected push
+triggering OCR, assessment response capture at the assigned SHA, repeated-poll
+and restart retention, and the complete review/assessment/merge gates. Offline
+schema and Helm checks do not demonstrate any of these. No workflow was
+activated or deployed by this resource change.
