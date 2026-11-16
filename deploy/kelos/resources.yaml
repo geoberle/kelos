@@ -36,12 +36,12 @@ spec:
   taskTemplate:
     worker:
       type: codex
-      model: gpt-5.4
+      model: gpt-6.1-sol
       effort: high
       workspaceRef:
         name: geoberle-kelos
       credentials:
-        type: api-key
+        type: oauth
         secretRef:
           name: kelos-openai
       podOverrides:

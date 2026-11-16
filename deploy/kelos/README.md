@@ -48,10 +48,12 @@ Provision Secrets in `kelos-agents` through the deployment's secret manager:
   and status comments, and metadata read. Validate actual permissions in a test
   repository. Use an identity whose pushes trigger Actions, not an Actions job's
   `GITHUB_TOKEN`. Record its login for exclusion from human-feedback processing.
-- `kelos-openai`: key `CODEX_API_KEY`. Confirm access to the configured Codex
-  model before activation. Never put credential values in Helm values or git.
+- `kelos-openai`: key `CODEX_AUTH_JSON`, the `auth.json` of a Codex ChatGPT
+  login used by no other client, labeled `kelos.dev/codex-oauth-refresh=true` so
+  Kelos keeps it refreshed. Confirm access to the configured Codex model before
+  activation. Never put credential values in Helm values or git.
 
-Implementation spawner values: one concurrent implementation Task, 60-second discovery, Codex gpt-5.4/high, worker
+Implementation spawner values: one concurrent implementation Task, 60-second discovery, Codex gpt-6.1-sol/high, worker
 requests 1 CPU/2Gi and limits 4 CPU/8Gi. These are starting settings requiring
 cluster capacity and model-access validation. Workspace is a per-Task checkout;
 there is no durable PVC configured. Preserve failed worker Pods/logs and recover
@@ -141,7 +143,7 @@ configuration:
     secret: kelos-openai
 ```
 
-`secret` is the Codex API-key Secret, not the GitHub credential. Provision the
+`secret` is the Codex OAuth Secret, not the GitHub credential. Provision the
 separate `kelos-github-assessment` Secret with key `GITHUB_TOKEN`: a
 repository-scoped credential with contents, pull requests and metadata read
 only, and no write permissions. The Workspace has no read-only switch; GitHub
@@ -163,7 +165,7 @@ passes model and effort only when supplied, leaving Codex's own defaults;
 the Job builder supplies no worker requests or limits without overrides
 (cluster admission such as LimitRange may supply them). AgentConfig cannot set
 these fields. Model access, effective runtime defaults and capacity remain an
-explicit operational consideration; the implementation gpt-5.4/high and
+explicit operational consideration; the implementation gpt-6.1-sol/high and
 1 CPU/2Gi requests do not carry over to Go-created Tasks.
 
 Before enabling scheduling, install these resources and Secrets, run one Go

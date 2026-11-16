@@ -290,7 +290,7 @@ func create(ctx context.Context, c *github.Client, k dynamic.Interface, config C
 		"apiVersion": "kelos.dev/v1alpha2", "kind": "Task",
 		"metadata": map[string]any{"name": name, "namespace": config.Namespace, "labels": map[string]any{"orchestrator.kelos.dev/pr": key}, "annotations": map[string]any{"orchestrator.kelos.dev/assignment": string(encoded)}},
 		"spec": map[string]any{
-			"worker": map[string]any{"type": "codex", "credentials": map[string]any{"type": "api-key", "secretRef": map[string]any{"name": config.Secret}}, "workspaceRef": map[string]any{"name": config.Workspace}, "agentConfigRefs": []any{map[string]any{"name": config.AgentConfig}}},
+			"worker": map[string]any{"type": "codex", "credentials": map[string]any{"type": "oauth", "secretRef": map[string]any{"name": config.Secret}}, "workspaceRef": map[string]any{"name": config.Workspace}, "agentConfigRefs": []any{map[string]any{"name": config.AgentConfig}}},
 			"branch": current.GetHead().GetRef(), "upstreamRepo": assignment.Repository, "prompt": prompt + string(encoded)},
 	}}
 	_, err = resource.Create(ctx, task, metav1.CreateOptions{})

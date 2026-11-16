@@ -299,7 +299,7 @@ func TestCurrentFindingsCreateRetainedTask(t *testing.T) {
 			if !ok {
 				t.Fatal("Task must use spec.worker")
 			}
-			if worker["credentials"].(map[string]any)["type"] != "api-key" {
+			if worker["credentials"].(map[string]any)["type"] != "oauth" {
 				t.Fatal("Task must use deployed API-key credentials")
 			}
 			if spec["branch"] != "agent-fix" {
