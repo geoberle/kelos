@@ -1,4 +1,4 @@
-module github.com/geoberle/kelos
+module github.com/hearthctl/kelos-orchestrator
 
 go 1.25.0
 

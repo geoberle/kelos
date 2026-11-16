@@ -13,7 +13,7 @@ import (
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
 
-	"github.com/geoberle/kelos/internal/editor"
+	"github.com/hearthctl/kelos-orchestrator/internal/editor"
 )
 
 func TestUnenrolledPullRequestsCreateNoTasks(t *testing.T) {

@@ -7,10 +7,10 @@ test:
 build:
 	go build -o bin/orchestrator ./cmd/orchestrator
 fmt:
-	$(GOIMPORTS) -local github.com/geoberle/kelos -w cmd internal
+	$(GOIMPORTS) -local github.com/hearthctl/kelos-orchestrator -w cmd internal
 	$(GOLANGCI) fmt
 fmt-check:
-	@test -z "$$($(GOIMPORTS) -local github.com/geoberle/kelos -l cmd internal)"
+	@test -z "$$($(GOIMPORTS) -local github.com/hearthctl/kelos-orchestrator -l cmd internal)"
 	$(GOLANGCI) fmt --diff > /tmp/kelos-format.diff
 	@test ! -s /tmp/kelos-format.diff
 lint:
@@ -21,4 +21,4 @@ image:
 	docker buildx build --platform linux/amd64,linux/arm64 .
 chart:
 	helm lint charts/orchestrator
-	helm template admission charts/orchestrator --set 'configuration.repositories[0]=geoberle/kelos' >/dev/null
+	helm template admission charts/orchestrator --set 'configuration.repositories[0]=hearthctl/kelos-orchestrator' >/dev/null

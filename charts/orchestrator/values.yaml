@@ -1,5 +1,5 @@
 image:
-  repository: ghcr.io/geoberle/kelos-orchestrator
+  repository: ghcr.io/hearthctl/kelos-orchestrator
   tag: "0.1.0"
   digest: ""
 imagePullSecrets: []

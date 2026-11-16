@@ -1,5 +1,5 @@
 # gha-runner-scale-set 0.13.1; dedicated repository-only review runners.
-githubConfigUrl: https://github.com/geoberle/kelos
+githubConfigUrl: https://github.com/hearthctl/kelos-orchestrator
 githubConfigSecret: arc-github-pat
 runnerScaleSetName: kelos-ocr
 minRunners: 0

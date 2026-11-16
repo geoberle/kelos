@@ -1,7 +1,7 @@
 # Native Kelos execution prerequisites
 
 This configuration supplies native execution prerequisites for issues #3/#6/#9. It is not a completed
-live deployment. Only `geoberle/kelos` is configured; keep the Go admission
+live deployment. Only `hearthctl/kelos-orchestrator` is configured; keep the Go admission
 allowlist identical. The spawner starts suspended. No Go runtime changes are made.
 
 ## Pins and setup
@@ -76,7 +76,7 @@ After installing the pinned chart and CRDs through Hearth, validate custom
 resources with `kubectl apply --dry-run=server -f deploy/kelos/resources.yaml`.
 Apply resources while suspended, verify Secrets and repository labels
 (`ready-for-agent`, `agent-start`, `agent-managed`), then explicitly activate with
-`kubectl -n kelos-agents patch taskspawner geoberle-kelos-implementation --type=merge -p '{"spec":{"suspend":false}}'`.
+`kubectl -n kelos-agents patch taskspawner hearthctl-kelos-orchestrator-implementation --type=merge -p '{"spec":{"suspend":false}}'`.
 No inbound endpoint is configured. Allow outbound DNS, Kubernetes API, GitHub
 API/git, image registries, model API and repository build dependencies.
 
@@ -128,17 +128,17 @@ Replace the controller login with the actual dedicated controller identity.
 
 ```yaml
 configuration:
-  repositories: [geoberle/kelos]
+  repositories: [hearthctl/kelos-orchestrator]
   controllerLogin: REPLACE_WITH_DEDICATED_CONTROLLER_LOGIN
   mergeEnabled: false
   editor:
     namespace: kelos-agents
-    workspace: geoberle-kelos
+    workspace: hearthctl-kelos-orchestrator
     agentConfig: kelos-editor
     secret: kelos-openai
   assessment:
     namespace: kelos-agents
-    workspace: geoberle-kelos-assessment
+    workspace: hearthctl-kelos-orchestrator-assessment
     agentConfig: kelos-assessment
     secret: kelos-openai
 ```

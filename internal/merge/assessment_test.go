@@ -19,7 +19,7 @@ import (
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
 
-	merge "github.com/geoberle/kelos/internal/merge"
+	merge "github.com/hearthctl/kelos-orchestrator/internal/merge"
 )
 
 func TestCleanReviewCreatesAssessment(t *testing.T) {

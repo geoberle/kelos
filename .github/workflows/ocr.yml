@@ -12,7 +12,7 @@ concurrency:
 jobs:
   review:
     if: >-
-      github.repository == 'geoberle/kelos' &&
+      github.repository == 'hearthctl/kelos-orchestrator' &&
       contains(github.event.pull_request.labels.*.name, 'agent-managed') &&
       (github.event.action != 'labeled' || github.event.label.name == 'agent-managed')
     runs-on: kelos-ocr

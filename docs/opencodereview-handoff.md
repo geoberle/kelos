@@ -22,7 +22,7 @@ Run the GitHub Action on ARC-managed self-hosted runners in the Kelos Kubernetes
 
 `.github/workflows/ocr.yml` pins the inspected Action SHA above (upstream tag
 v1.13.10) and independently pins npm CLI `1.13.10`. It runs only enrolled PRs
-in `geoberle/kelos`, on the dedicated `kelos-ocr` scale set. Reuse in another
+in `hearthctl/kelos-orchestrator`, on the dedicated `kelos-ocr` scale set. Reuse in another
 repository requires an explicit allowlist/runner URL change and installing the
 trusted rules there. The trusted base supplies workflow and rules. The upstream
 action checks out that base and fetches PR Git objects; no PR build, test,

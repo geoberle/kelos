@@ -27,7 +27,7 @@ check.
 Example configuration (the repository is explicitly selected by the operator):
 
 ```json
-{"version":"v1","repositories":["geoberle/kelos"],"pollInterval":"1m"}
+{"version":"v1","repositories":["hearthctl/kelos-orchestrator"],"pollInterval":"1m"}
 ```
 
 Run `orchestrator --config-file=config.json --app-credential-dir=/credential`.

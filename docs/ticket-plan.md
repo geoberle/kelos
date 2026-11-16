@@ -1,6 +1,6 @@
 # Published implementation slices
 
-Source: https://github.com/geoberle/kelos/issues/1
+Source: https://github.com/hearthctl/kelos-orchestrator/issues/1
 
 Approved and published as sub-issues of specification #1. Section numbers are planning identifiers; use the GitHub links below for issue numbers. Each implementation slice includes relevant table-driven tests, golden fixtures, restart/deduplication behavior, and failure handling at the agreed external test boundary. Shared Go runtime/configuration is introduced by slice 1; later slices extend the same binary. No separate generic framework or final hardening phase is proposed.
 
@@ -140,13 +140,13 @@ Reference inspection: ARO-HCP's templatize commands use RawOptions.Validate → 
 
 ## Published issues
 
-- Slice 1: [Admit eligible issues through the deployed Go component](https://github.com/geoberle/kelos/issues/2) — blocked by none.
-- Slice 2: [Turn admitted issues into agent-managed PRs](https://github.com/geoberle/kelos/issues/3) — blocked by #2.
-- Slice 3: [Review a PR with OCR on internal ARC runners](https://github.com/geoberle/kelos/issues/4) — blocked by none.
-- Slice 4: [Publish review completion from verified OCR evidence](https://github.com/geoberle/kelos/issues/5) — blocked by #2, #4.
-- Slice 5: [Repair OCR findings and obtain a fresh review](https://github.com/geoberle/kelos/issues/6) — blocked by #3, #5.
-- Slice 6: [Preserve and act on human feedback during automation](https://github.com/geoberle/kelos/issues/7) — blocked by #6.
-- Slice 7: [Merge exactly the commit approved by a human](https://github.com/geoberle/kelos/issues/8) — blocked by #2.
-- Slice 8: [Assess unattended merge suitability through Kelos](https://github.com/geoberle/kelos/issues/9) — blocked by #5, #8.
-- Slice 9: [Integrate published components into Hearth](https://github.com/geoberle/kelos/issues/10) — blocked by #3, #4.
-- Slice 10: [Verify the complete workflow and operating procedure](https://github.com/geoberle/kelos/issues/11) — blocked by #7, #9, #10.
+- Slice 1: [Admit eligible issues through the deployed Go component](https://github.com/hearthctl/kelos-orchestrator/issues/2) — blocked by none.
+- Slice 2: [Turn admitted issues into agent-managed PRs](https://github.com/hearthctl/kelos-orchestrator/issues/3) — blocked by #2.
+- Slice 3: [Review a PR with OCR on internal ARC runners](https://github.com/hearthctl/kelos-orchestrator/issues/4) — blocked by none.
+- Slice 4: [Publish review completion from verified OCR evidence](https://github.com/hearthctl/kelos-orchestrator/issues/5) — blocked by #2, #4.
+- Slice 5: [Repair OCR findings and obtain a fresh review](https://github.com/hearthctl/kelos-orchestrator/issues/6) — blocked by #3, #5.
+- Slice 6: [Preserve and act on human feedback during automation](https://github.com/hearthctl/kelos-orchestrator/issues/7) — blocked by #6.
+- Slice 7: [Merge exactly the commit approved by a human](https://github.com/hearthctl/kelos-orchestrator/issues/8) — blocked by #2.
+- Slice 8: [Assess unattended merge suitability through Kelos](https://github.com/hearthctl/kelos-orchestrator/issues/9) — blocked by #5, #8.
+- Slice 9: [Integrate published components into Hearth](https://github.com/hearthctl/kelos-orchestrator/issues/10) — blocked by #3, #4.
+- Slice 10: [Verify the complete workflow and operating procedure](https://github.com/hearthctl/kelos-orchestrator/issues/11) — blocked by #7, #9, #10.

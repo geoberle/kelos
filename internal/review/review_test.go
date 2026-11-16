@@ -10,7 +10,7 @@ import (
 
 	"github.com/google/go-github/v80/github"
 
-	"github.com/geoberle/kelos/internal/review"
+	"github.com/hearthctl/kelos-orchestrator/internal/review"
 )
 
 func TestPollEmptyRepository(t *testing.T) {

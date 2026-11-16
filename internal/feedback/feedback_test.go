@@ -9,7 +9,7 @@ import (
 
 	"github.com/google/go-github/v80/github"
 
-	"github.com/geoberle/kelos/internal/feedback"
+	"github.com/hearthctl/kelos-orchestrator/internal/feedback"
 )
 
 func TestObservedFeedbackSurvivesDeletion(t *testing.T) {

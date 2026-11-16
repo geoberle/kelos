@@ -14,7 +14,7 @@ import (
 
 	"github.com/google/go-github/v80/github"
 
-	merge "github.com/geoberle/kelos/internal/merge"
+	merge "github.com/hearthctl/kelos-orchestrator/internal/merge"
 )
 
 func TestGuardedMerge(t *testing.T) {

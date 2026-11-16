@@ -18,10 +18,10 @@ import (
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
 
-	"github.com/geoberle/kelos/internal/admission"
-	"github.com/geoberle/kelos/internal/editor"
-	merge "github.com/geoberle/kelos/internal/merge"
-	"github.com/geoberle/kelos/internal/review"
+	"github.com/hearthctl/kelos-orchestrator/internal/admission"
+	"github.com/hearthctl/kelos-orchestrator/internal/editor"
+	merge "github.com/hearthctl/kelos-orchestrator/internal/merge"
+	"github.com/hearthctl/kelos-orchestrator/internal/review"
 )
 
 type RawOptions struct {

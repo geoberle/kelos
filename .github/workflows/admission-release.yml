@@ -46,11 +46,11 @@ jobs:
           import os
           from pathlib import Path
           p = Path('charts/orchestrator/values.yaml')
-          s = p.read_text().replace('ghcr.io/geoberle/kelos-orchestrator', os.environ['IMAGE_REPOSITORY'])
+          s = p.read_text().replace('ghcr.io/hearthctl/kelos-orchestrator', os.environ['IMAGE_REPOSITORY'])
           s = s.replace('digest: ""', 'digest: "' + os.environ['IMAGE_DIGEST'] + '"')
           p.write_text(s)
           PY
           helm package charts/orchestrator --version "${RELEASE_TAG#v}" --app-version "$RELEASE_TAG" -d dist
           helm push "dist/orchestrator-${RELEASE_TAG#v}.tgz" "oci://ghcr.io/$REGISTRY_OWNER/charts"
           helm pull "oci://ghcr.io/$REGISTRY_OWNER/charts/orchestrator" --version "${RELEASE_TAG#v}" --destination /tmp
-          helm template smoke "/tmp/orchestrator-${RELEASE_TAG#v}.tgz" --set 'configuration.repositories[0]=geoberle/kelos' > /tmp/rendered.yaml
+          helm template smoke "/tmp/orchestrator-${RELEASE_TAG#v}.tgz" --set 'configuration.repositories[0]=hearthctl/kelos-orchestrator' > /tmp/rendered.yaml

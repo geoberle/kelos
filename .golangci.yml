@@ -14,4 +14,4 @@ formatters:
   settings:
     gci:
       custom-order: true
-      sections: [standard, default, 'prefix(github.com/geoberle/kelos)']
+      sections: [standard, default, 'prefix(github.com/hearthctl/kelos-orchestrator)']

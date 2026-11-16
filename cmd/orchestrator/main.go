@@ -10,7 +10,7 @@ import (
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
 
-	"github.com/geoberle/kelos/cmd/options"
+	"github.com/hearthctl/kelos-orchestrator/cmd/options"
 )
 
 func main() {

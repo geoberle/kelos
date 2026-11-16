@@ -6,7 +6,7 @@ A human-applied `lgtm` label cannot currently be proven to identify the intended
 
 ## Scope and evidence
 
-Read specification [issue #1](https://github.com/geoberle/kelos/issues/1), [issue #8](https://github.com/geoberle/kelos/issues/8), GLOSSARY.md, docs/spec.md, docs/ticket-plan.md, and ADRs 0001–0006. ADR 0004 supersedes 0001; outbound polling and direct commit-specific merging remain constraints. Read the requested TDD skill. No runtime, design decision, GitHub resource, deployment, or package visibility was changed.
+Read specification [issue #1](https://github.com/hearthctl/kelos-orchestrator/issues/1), [issue #8](https://github.com/hearthctl/kelos-orchestrator/issues/8), GLOSSARY.md, docs/spec.md, docs/ticket-plan.md, and ADRs 0001–0006. ADR 0004 supersedes 0001; outbound polling and direct commit-specific merging remain constraints. Read the requested TDD skill. No runtime, design decision, GitHub resource, deployment, or package visibility was changed.
 
 The prepared `issue-8-feasibility` checkout includes `dffa74fc4260d102732ba8c434c44182949ef5ef`; `git merge-base --is-ancestor` succeeded for both HEAD and local `integration/issue-to-merge`. The integration branch initially pointed to that exact commit.
 
@@ -18,7 +18,7 @@ The REST [issue event contract](https://docs.github.com/en/rest/using-the-rest-a
 
 Live GraphQL introspection confirmed those fields. `HeadRefForcePushedEvent` exposed `beforeCommit` and `afterCommit` as nullable Commit objects, along with actor, createdAt, id, pullRequest and ref. That can explain some force pushes, but does not prove complete ordinary-push history or guarantee recovery when commit objects are unavailable. `PullRequestCommit` exposed commit, id, pullRequest, resourcePath and url: no push timestamp or before/after ref transition.
 
-Read-only `GET /repos/geoberle/kelos/issues/12/timeline` returned four committed entries (2265dfa, ebf5baf, 8beb527, dffa74f), each with no event id or created_at. There were no labeled or force-push events in this sample, so their runtime values were not empirically demonstrated. Commit author/committer dates are not push times. Current commits alone cannot place an earlier label relative to an ordinary push.
+Read-only `GET /repos/hearthctl/kelos-orchestrator/issues/12/timeline` returned four committed entries (2265dfa, ebf5baf, 8beb527, dffa74f), each with no event id or created_at. There were no labeled or force-push events in this sample, so their runtime values were not empirically demonstrated. Commit author/committer dates are not push times. Current commits alone cannot place an earlier label relative to an ordinary push.
 
 Counterexample requiring proof: while polling is down, label A's head, then push B; compare pushing B first, then labeling it. A current head of B plus a label does not distinguish these approvals. Force pushes A→B→A also require invalidation under the existing new-commit policy even though the final SHA matches. No complete replay guarantee was established.
 
@@ -31,7 +31,7 @@ Reproduce the schema checks without mutations:
 ```sh
 gh api graphql -f query='{ label: __type(name:"LabeledEvent") { fields { name } } force: __type(name:"HeadRefForcePushedEvent") { fields { name type { kind name ofType { name } } } } }'
 gh api graphql -f query='{ __type(name:"PullRequestCommit") { fields { name } } }'
-gh api --paginate repos/geoberle/kelos/issues/12/timeline
+gh api --paginate repos/hearthctl/kelos-orchestrator/issues/12/timeline
 ```
 
 ## Authorization

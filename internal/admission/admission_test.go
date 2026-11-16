@@ -12,7 +12,7 @@ import (
 
 	"github.com/google/go-github/v80/github"
 
-	"github.com/geoberle/kelos/internal/admission"
+	"github.com/hearthctl/kelos-orchestrator/internal/admission"
 )
 
 func TestAdmission(t *testing.T) {

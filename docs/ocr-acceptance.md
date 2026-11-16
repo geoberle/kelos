@@ -10,11 +10,11 @@ Validated from branch `ocr-arc-acceptance`, initially at
 - cert-manager controller, cainjector and webhook: each 1/1 available.
 - Namespaces `arc-systems` and `arc-runners`: NotFound. No ARC Secret or
   runner deployment exists in those intended namespaces.
-- GitHub `repos/geoberle/kelos/actions/runners`: `total_count: 0`.
+- GitHub `repos/hearthctl/kelos-orchestrator/actions/runners`: `total_count: 0`.
 - Repository is public, default branch `main`. Registered workflows list only
   Admission CI; OCR is not yet installed on the default branch.
-- `gh secret list --repo geoberle/kelos` and `gh variable list --repo
-  geoberle/kelos` both returned empty lists. Required inputs are
+- `gh secret list --repo hearthctl/kelos-orchestrator` and `gh variable list --repo
+  hearthctl/kelos-orchestrator` both returned empty lists. Required inputs are
   `OCR_LLM_URL`, `OCR_LLM_AUTH_TOKEN` and `OCR_LLM_MODEL`.
 - `/tmp/kelos-hearth-integration/kelos/deploy/values.local.yaml` is absent.
   The operator subsequently selected PAT authentication; supply `arc_github_token`

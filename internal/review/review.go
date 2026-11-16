@@ -17,7 +17,7 @@ import (
 
 	"github.com/google/go-github/v80/github"
 
-	"github.com/geoberle/kelos/internal/feedback"
+	"github.com/hearthctl/kelos-orchestrator/internal/feedback"
 )
 
 // Poll reconciles enrolled PRs in the explicit allowlist.

@@ -19,8 +19,8 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
 
-	"github.com/geoberle/kelos/internal/feedback"
-	"github.com/geoberle/kelos/internal/review"
+	"github.com/hearthctl/kelos-orchestrator/internal/feedback"
+	"github.com/hearthctl/kelos-orchestrator/internal/review"
 )
 
 type Config struct {

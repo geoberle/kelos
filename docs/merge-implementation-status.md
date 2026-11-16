@@ -56,7 +56,7 @@ a head returns, and ambiguous merge responses. Golden fixtures assert the exact
 merge payload and retained revocation record. Race tests, formatting and lint run
 with `GOTOOLCHAIN=go1.25.5`.
 
-The operator made `geoberle/kelos` public on 2026-11-16. The protection APIs no
+The operator made `hearthctl/kelos-orchestrator` public on 2026-11-16. The protection APIs no
 longer return the plan-related 403: `main` returns “Branch not protected” and its
 effective rules list is empty. Live merge acceptance still requires configured
 required CI and merge enforcement. The separate `agent/**` rule protects editor
