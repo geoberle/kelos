@@ -20,3 +20,4 @@ resources:
     memory: 128Mi
 
 # configuration.assessment: {namespace: kelos-agents, workspaces: {owner/repo: read-only-repo}, agentConfig: assessment, secret: kelos-openai}
+# configuration.implementation: {namespace: kelos-agents} reports stopped implementation Tasks and posts the run command on admission.

@@ -131,6 +131,8 @@ configuration:
   repositories: [hearthctl/kelos-orchestrator]
   controllerLogin: REPLACE_WITH_DEDICATED_CONTROLLER_LOGIN
   mergeEnabled: false
+  implementation:
+    namespace: kelos-agents
   editor:
     namespace: kelos-agents
     workspaces:
