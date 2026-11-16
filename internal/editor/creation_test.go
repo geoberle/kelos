@@ -243,7 +243,7 @@ func TestCurrentFindingsCreateRetainedTask(t *testing.T) {
 						}
 					}
 				}
-				err = editor.Poll(context.Background(), client, kube, []string{"owner/repo"}, editor.Config{Namespace: "agents", Workspace: "repo", AgentConfig: "editor", Secret: "codex"}, "controller")
+				err = editor.Poll(context.Background(), client, kube, []string{"owner/repo"}, editor.Config{Namespace: "agents", Workspaces: map[string]string{"owner/repo": "repo", "other/repo": "other"}, AgentConfig: "editor", Secret: "codex"}, "controller")
 				if (err != nil) != (tc.ambiguous || tc.blocked) {
 					t.Fatalf("unexpected error: %v", err)
 				}
@@ -301,6 +301,9 @@ func TestCurrentFindingsCreateRetainedTask(t *testing.T) {
 			}
 			if worker["credentials"].(map[string]any)["type"] != "oauth" {
 				t.Fatal("Task must use deployed API-key credentials")
+			}
+			if worker["workspaceRef"].(map[string]any)["name"] != "repo" {
+				t.Fatal("Task must use the workspace of its repository")
 			}
 			if spec["branch"] != "agent-fix" {
 				t.Fatal("Task lost PR branch")

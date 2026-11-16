@@ -1,9 +1,10 @@
 # OCR editor
 
 Optional `configuration.editor` enables Task scheduling with `namespace`,
-`workspace`, `agentConfig`, and `secret` (Codex API-key Secret name). Each is required;
-`controllerLogin` must also be configured. The namespace, Workspace, AgentConfig,
-and Secret must already exist. The Role allows only reading and creating Tasks.
+`workspaces`, `agentConfig`, and `secret` (Codex API-key Secret name). Each is required;
+`controllerLogin` must also be configured. `workspaces` maps every configured
+repository (`owner/repo`) to its Kelos Workspace. The namespace, Workspaces,
+AgentConfig, and Secret must already exist. The Role allows only reading and creating Tasks.
 No live installation is enabled by default.
 
 The direct client-go v0.34.1 dynamic client uses Kelos v1alpha2 Task resources,

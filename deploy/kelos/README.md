@@ -133,12 +133,14 @@ configuration:
   mergeEnabled: false
   editor:
     namespace: kelos-agents
-    workspace: hearthctl-kelos-orchestrator
+    workspaces:
+      hearthctl/kelos-orchestrator: hearthctl-kelos-orchestrator
     agentConfig: kelos-editor
     secret: kelos-openai
   assessment:
     namespace: kelos-agents
-    workspace: hearthctl-kelos-orchestrator-assessment
+    workspaces:
+      hearthctl/kelos-orchestrator: hearthctl-kelos-orchestrator-assessment
     agentConfig: kelos-assessment
     secret: kelos-openai
 ```

@@ -80,11 +80,20 @@ func (o *RawOptions) Validate() (*ValidatedOptions, error) {
 	if config.MergeEnabled && len(config.ControllerLogin) == 0 {
 		return nil, fmt.Errorf("mergeEnabled requires controllerLogin")
 	}
-	if config.Editor != nil && (len(config.Editor.Namespace) == 0 || len(config.Editor.Workspace) == 0 || len(config.Editor.AgentConfig) == 0 || len(config.Editor.Secret) == 0 || len(config.ControllerLogin) == 0) {
-		return nil, fmt.Errorf("editor requires namespace, workspace, agentConfig, secret and controllerLogin")
+	if config.Editor != nil && (len(config.Editor.Namespace) == 0 || len(config.Editor.AgentConfig) == 0 || len(config.Editor.Secret) == 0 || len(config.ControllerLogin) == 0) {
+		return nil, fmt.Errorf("editor requires namespace, agentConfig, secret and controllerLogin")
 	}
-	if config.Assessment != nil && (len(config.Assessment.Namespace) == 0 || len(config.Assessment.Workspace) == 0 || len(config.Assessment.AgentConfig) == 0 || len(config.Assessment.Secret) == 0 || len(config.ControllerLogin) == 0) {
-		return nil, fmt.Errorf("assessment requires namespace, read-only workspace, agentConfig, secret and controllerLogin")
+	if config.Assessment != nil && (len(config.Assessment.Namespace) == 0 || len(config.Assessment.AgentConfig) == 0 || len(config.Assessment.Secret) == 0 || len(config.ControllerLogin) == 0) {
+		return nil, fmt.Errorf("assessment requires namespace, agentConfig, secret and controllerLogin")
+	}
+	// A Task started in another repository's Workspace would edit the wrong clone.
+	for _, repo := range config.Repositories {
+		if config.Editor != nil && len(config.Editor.Workspaces[repo]) == 0 {
+			return nil, fmt.Errorf("editor requires a workspace for %s", repo)
+		}
+		if config.Assessment != nil && len(config.Assessment.Workspaces[repo]) == 0 {
+			return nil, fmt.Errorf("assessment requires a read-only workspace for %s", repo)
+		}
 	}
 	interval, err := time.ParseDuration(config.PollInterval)
 	if err != nil || interval < time.Second {
