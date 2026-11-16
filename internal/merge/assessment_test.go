@@ -284,7 +284,7 @@ func TestCleanReviewCreatesAssessment(t *testing.T) {
 					t.Fatal(err)
 				}
 
-				err = merge.Assess(context.Background(), client, kube, []string{"owner/repo"}, merge.AssessmentConfig{Namespace: "agents", Workspace: "repo", AgentConfig: "editor", Secret: "codex"}, "controller")
+				err = merge.Assess(context.Background(), client, kube, []string{"owner/repo"}, merge.AssessmentConfig{Namespace: "agents", Workspaces: map[string]string{"owner/repo": "repo", "other/repo": "other"}, AgentConfig: "editor", Secret: "codex"}, "controller")
 				if err != nil {
 					t.Fatalf("unexpected error: %v", err)
 				}
@@ -309,6 +309,9 @@ func TestCleanReviewCreatesAssessment(t *testing.T) {
 			}
 			if worker["credentials"].(map[string]any)["type"] != "oauth" {
 				t.Fatal("Task must use deployed API-key credentials")
+			}
+			if worker["workspaceRef"].(map[string]any)["name"] != "repo" {
+				t.Fatal("Task must use the workspace of its repository")
 			}
 			if spec["branch"] != "agent-fix" {
 				t.Fatal("Task lost PR branch")

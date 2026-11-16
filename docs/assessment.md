@@ -1,10 +1,11 @@
 # Merge assessment
 
-Set optional `configuration.assessment` with `namespace`, `workspace`,
-`agentConfig` and `secret`, plus the dedicated `controllerLogin`. The namespace,
-Kelos Workspace, AgentConfig and Codex API-key Secret must already exist. Use a
-separate Workspace whose GitHub credential can only read the repository; never
-reuse the editor's write credential. The assessor may investigate using local
+Set optional `configuration.assessment` with `namespace`, `workspaces`,
+`agentConfig` and `secret`, plus the dedicated `controllerLogin`. `workspaces`
+maps every configured repository (`owner/repo`) to its Kelos Workspace. The
+namespace, Workspaces, AgentConfig and Codex API-key Secret must already exist.
+Use separate Workspaces whose GitHub credential can only read the repository;
+never reuse the editor's write credential. The assessor may investigate using local
 files, tools and skills, but must not mutate GitHub or publish branch changes.
 Credential permissions require verification before activation.
 

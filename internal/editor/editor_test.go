@@ -35,7 +35,7 @@ func TestUnenrolledPullRequestsCreateNoTasks(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := editor.Poll(context.Background(), gh, kube, []string{"acme/repo"}, editor.Config{Namespace: "agents", Workspace: "repo", AgentConfig: "editor", Secret: "codex"}, "controller"); err != nil {
+			if err := editor.Poll(context.Background(), gh, kube, []string{"acme/repo"}, editor.Config{Namespace: "agents", Workspaces: map[string]string{"acme/repo": "repo"}, AgentConfig: "editor", Secret: "codex"}, "controller"); err != nil {
 				t.Fatal(err)
 			}
 		})
@@ -81,7 +81,7 @@ func TestRetainedEditorsPreventNewWork(t *testing.T) {
 				t.Fatal(err)
 			}
 			for range 2 {
-				err = editor.Poll(context.Background(), gh, kube, []string{"acme/repo"}, editor.Config{Namespace: "agents", Workspace: "repo", AgentConfig: "editor", Secret: "codex"}, "controller")
+				err = editor.Poll(context.Background(), gh, kube, []string{"acme/repo"}, editor.Config{Namespace: "agents", Workspaces: map[string]string{"acme/repo": "repo"}, AgentConfig: "editor", Secret: "codex"}, "controller")
 				if (err != nil) != (phase == "Succeeded" || phase == "Failed") {
 					t.Fatalf("unexpected result: %v", err)
 				}

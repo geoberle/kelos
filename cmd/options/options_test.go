@@ -72,3 +72,44 @@ func TestCompleteLoadsGitHubAppCredential(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateRequiresWorkspacePerRepository(t *testing.T) {
+	tests := []struct {
+		name    string
+		config  string
+		wantErr bool
+	}{
+		{
+			name:   "editor and assessment workspace for every repository",
+			config: `{"version":"v1","repositories":["hearthctl/pi5-bootlab","hearthctl/lunactl"],"pollInterval":"1m","controllerLogin":"controller[bot]","editor":{"namespace":"agents","workspaces":{"hearthctl/pi5-bootlab":"pi5","hearthctl/lunactl":"lunactl"},"agentConfig":"editor","secret":"codex"},"assessment":{"namespace":"agents","workspaces":{"hearthctl/pi5-bootlab":"pi5-assessment","hearthctl/lunactl":"lunactl-assessment"},"agentConfig":"assessment","secret":"codex"}}`,
+		},
+		{
+			name:    "editor workspace missing for one repository",
+			config:  `{"version":"v1","repositories":["hearthctl/pi5-bootlab","hearthctl/lunactl"],"pollInterval":"1m","controllerLogin":"controller[bot]","editor":{"namespace":"agents","workspaces":{"hearthctl/pi5-bootlab":"pi5"},"agentConfig":"editor","secret":"codex"}}`,
+			wantErr: true,
+		},
+		{
+			name:    "assessment workspace missing for one repository",
+			config:  `{"version":"v1","repositories":["hearthctl/pi5-bootlab","hearthctl/lunactl"],"pollInterval":"1m","controllerLogin":"controller[bot]","assessment":{"namespace":"agents","workspaces":{"hearthctl/lunactl":"lunactl-assessment"},"agentConfig":"assessment","secret":"codex"}}`,
+			wantErr: true,
+		},
+		{
+			name:    "single workspace for all repositories is rejected",
+			config:  `{"version":"v1","repositories":["hearthctl/pi5-bootlab"],"pollInterval":"1m","controllerLogin":"controller[bot]","editor":{"namespace":"agents","workspace":"pi5","agentConfig":"editor","secret":"codex"}}`,
+			wantErr: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			config := filepath.Join(dir, "config.json")
+			if err := os.WriteFile(config, []byte(tt.config), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			_, err := (&RawOptions{ConfigFile: config, AppCredentialDir: dir}).Validate()
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("Validate() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
