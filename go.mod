@@ -7,6 +7,7 @@ require (
 	github.com/go-logr/logr v1.4.2
 	github.com/go-logr/zapr v1.3.0
 	github.com/google/go-github/v80 v80.0.0
+	github.com/gregjones/httpcache v0.0.0-20190611155906-901d90724c79
 	github.com/spf13/cobra v1.10.2
 	go.uber.org/zap v1.27.0
 	k8s.io/apimachinery v0.34.1

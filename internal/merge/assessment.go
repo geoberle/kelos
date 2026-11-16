@@ -48,7 +48,7 @@ const assessmentMarker = "<!-- kelos-assessment/v1 -->\n"
 
 var assessmentTasks = schema.GroupVersionResource{Group: "kelos.dev", Version: "v1alpha2", Resource: "tasks"}
 
-func Assess(ctx context.Context, c *github.Client, k dynamic.Interface, repositories []string, config AssessmentConfig, controller string) error {
+func Assess(ctx context.Context, c *github.Client, cache *review.Cache, k dynamic.Interface, repositories []string, config AssessmentConfig, controller string) error {
 	if len(controller) == 0 || controller == "geoberle" {
 		return fmt.Errorf("dedicated assessment controller required")
 	}
@@ -64,7 +64,7 @@ func Assess(ctx context.Context, c *github.Client, k dynamic.Interface, reposito
 			}
 			for _, pr := range prs {
 				if label(pr, "agent-managed") {
-					if err := assess(ctx, c, k, owner, repo, pr, config, controller); err != nil {
+					if err := assess(ctx, c, cache, k, owner, repo, pr, config, controller); err != nil {
 						failures = append(failures, fmt.Errorf("%s#%d: %w", repository, pr.GetNumber(), err))
 					}
 				}
@@ -151,7 +151,7 @@ func reassessSHA(body string) string {
 	return strings.ToLower(fields[1])
 }
 
-func assess(ctx context.Context, c *github.Client, k dynamic.Interface, owner, repo string, listed *github.PullRequest, config AssessmentConfig, controller string) error {
+func assess(ctx context.Context, c *github.Client, cache *review.Cache, k dynamic.Interface, owner, repo string, listed *github.PullRequest, config AssessmentConfig, controller string) error {
 	pr, _, err := c.PullRequests.Get(ctx, owner, repo, listed.GetNumber())
 	if err != nil {
 		return err
@@ -182,19 +182,19 @@ func assess(ctx context.Context, c *github.Client, k dynamic.Interface, owner, r
 			if err := writeAssessments(ctx, c, owner, repo, pr.GetNumber(), controller, history, existing); err != nil {
 				return err
 			}
-			return assessmentLabel(ctx, c, owner, repo, pr.GetNumber(), controller)
+			return assessmentLabel(ctx, c, cache, owner, repo, pr.GetNumber(), controller)
 		}
 		return nil
 	}
 	if err := requiredCI(ctx, c, owner, repo, pr); err != nil {
 		return err
 	}
-	complete, err := review.Complete(ctx, c, owner, repo, pr, controller)
+	complete, err := review.Complete(ctx, c, cache, owner, repo, pr, controller)
 	if err != nil {
 		return err
 	}
 	if !complete {
-		return assessmentLabel(ctx, c, owner, repo, pr.GetNumber(), controller)
+		return assessmentLabel(ctx, c, cache, owner, repo, pr.GetNumber(), controller)
 	}
 	request := int64(0)
 	for _, comment := range comments {
@@ -224,7 +224,7 @@ func assess(ctx context.Context, c *github.Client, k dynamic.Interface, owner, r
 		if err := writeAssessments(ctx, c, owner, repo, pr.GetNumber(), controller, history, existing); err != nil {
 			return err
 		}
-		return assessmentLabel(ctx, c, owner, repo, pr.GetNumber(), controller)
+		return assessmentLabel(ctx, c, cache, owner, repo, pr.GetNumber(), controller)
 	}
 	if index < 0 || history.Attempts[index].Request != request {
 		name := fmt.Sprintf("assessment-%x", sha256.Sum256([]byte(fmt.Sprintf("%s/%s/%d/%s/%d", owner, repo, pr.GetNumber(), pr.GetHead().GetSHA(), request))))[:59]
@@ -279,15 +279,15 @@ func assess(ctx context.Context, c *github.Client, k dynamic.Interface, owner, r
 	if err := writeAssessments(ctx, c, owner, repo, pr.GetNumber(), controller, history, existing); err != nil {
 		return err
 	}
-	return assessmentLabel(ctx, c, owner, repo, pr.GetNumber(), controller)
+	return assessmentLabel(ctx, c, cache, owner, repo, pr.GetNumber(), controller)
 }
 
-func assessmentLabel(ctx context.Context, c *github.Client, owner, repo string, number int, controller string) error {
+func assessmentLabel(ctx context.Context, c *github.Client, cache *review.Cache, owner, repo string, number int, controller string) error {
 	current, _, err := c.PullRequests.Get(ctx, owner, repo, number)
 	if err != nil {
 		return err
 	}
-	approval, err := authorize(ctx, c, owner, repo, current, controller)
+	approval, err := authorize(ctx, c, cache, owner, repo, current, controller)
 	if err != nil || approval == nil {
 		return errors.Join(err, withdraw(ctx, c, owner, repo, current))
 	}
@@ -342,7 +342,7 @@ func decodeAssessment(raw []byte, head string) (string, string, error) {
 
 // Automated approval is controller-owned evidence, consumed by the same merge
 // path as human approval. Labels never supply this authority.
-func automaticApproval(ctx context.Context, c *github.Client, owner, repo string, pr *github.PullRequest, controller string, comments []*github.IssueComment) (*github.IssueComment, error) {
+func automaticApproval(ctx context.Context, c *github.Client, cache *review.Cache, owner, repo string, pr *github.PullRequest, controller string, comments []*github.IssueComment) (*github.IssueComment, error) {
 	history, existing, err := assessmentHistory(comments, controller)
 	if err != nil || existing == nil {
 		return nil, err
@@ -392,7 +392,8 @@ func automaticApproval(ctx context.Context, c *github.Client, owner, repo string
 		valid = !blocked
 	}
 	if valid {
-		complete, err := review.Complete(ctx, c, owner, repo, pr, controller)
+		// Fresh: this decides whether an approval still authorizes a merge.
+		complete, err := review.CompleteNow(ctx, c, cache, owner, repo, pr, controller)
 		if err != nil {
 			return nil, err
 		}

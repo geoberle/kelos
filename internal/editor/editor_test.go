@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -15,6 +16,7 @@ import (
 	"k8s.io/client-go/rest"
 
 	"github.com/hearthctl/kelos-orchestrator/internal/editor"
+	"github.com/hearthctl/kelos-orchestrator/internal/review"
 )
 
 func TestUnenrolledPullRequestsCreateNoTasks(t *testing.T) {
@@ -36,7 +38,7 @@ func TestUnenrolledPullRequestsCreateNoTasks(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := editor.Poll(context.Background(), gh, kube, []string{"acme/repo"}, editor.Config{Namespace: "agents", Workspaces: map[string]string{"acme/repo": "repo"}, AgentConfig: "editor", Secret: "codex"}, "controller"); err != nil {
+			if err := editor.Poll(context.Background(), gh, review.NewCache(), kube, []string{"acme/repo"}, editor.Config{Namespace: "agents", Workspaces: map[string]string{"acme/repo": "repo"}, AgentConfig: "editor", Secret: "codex"}, "controller"); err != nil {
 				t.Fatal(err)
 			}
 		})
@@ -82,7 +84,7 @@ func TestRetainedEditorsPreventNewWork(t *testing.T) {
 				t.Fatal(err)
 			}
 			for range 2 {
-				err = editor.Poll(context.Background(), gh, kube, []string{"acme/repo"}, editor.Config{Namespace: "agents", Workspaces: map[string]string{"acme/repo": "repo"}, AgentConfig: "editor", Secret: "codex"}, "controller")
+				err = editor.Poll(context.Background(), gh, review.NewCache(), kube, []string{"acme/repo"}, editor.Config{Namespace: "agents", Workspaces: map[string]string{"acme/repo": "repo"}, AgentConfig: "editor", Secret: "codex"}, "controller")
 				if (err != nil) != (phase == "Succeeded" || phase == "Failed") {
 					t.Fatalf("unexpected result: %v", err)
 				}
@@ -132,13 +134,27 @@ func TestEditorResultAccounting(t *testing.T) {
 			var replies []map[string]string
 			// Receipts for addressed findings are controller comments, not replies.
 			var receipts []string
+			recorded := false
+			requests := map[string]int{}
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
+				requests[r.Method+" "+r.URL.Path]++
 				switch r.URL.Path {
+				case "/apis/kelos.dev/v1alpha2/namespaces/agents/tasks/retained":
+					patch, _ := io.ReadAll(r.Body)
+					if r.Method != "PATCH" || string(patch) != `{"metadata":{"annotations":{"orchestrator.kelos.dev/result-recorded":"true"}}}` {
+						t.Errorf("unexpected Task request: %s %s", r.Method, patch)
+					}
+					recorded = true
+					_, _ = w.Write([]byte(`{"apiVersion":"kelos.dev/v1alpha2","kind":"Task","metadata":{"name":"retained","namespace":"agents"}}`))
 				case "/repos/acme/repo/pulls":
 					_, _ = w.Write([]byte(`[{"number":1,"labels":[{"name":"agent-managed"}],"head":{"sha":"abc"}}]`))
 				case "/apis/kelos.dev/v1alpha2/namespaces/agents/tasks":
-					body := map[string]any{"apiVersion": "kelos.dev/v1alpha2", "kind": "TaskList", "items": []any{map[string]any{"metadata": map[string]any{"name": "retained", "annotations": map[string]string{"orchestrator.kelos.dev/assignment": assignment}}, "status": map[string]any{"phase": "Succeeded", "results": map[string]string{"response": base64.StdEncoding.EncodeToString([]byte("---KELOS_OUTPUTS_START---\neditor-result: " + result + "\n---KELOS_OUTPUTS_END---"))}}}}}
+					annotations := map[string]string{"orchestrator.kelos.dev/assignment": assignment}
+					if recorded {
+						annotations["orchestrator.kelos.dev/result-recorded"] = "true"
+					}
+					body := map[string]any{"apiVersion": "kelos.dev/v1alpha2", "kind": "TaskList", "items": []any{map[string]any{"metadata": map[string]any{"name": "retained", "annotations": annotations}, "status": map[string]any{"phase": "Succeeded", "results": map[string]string{"response": base64.StdEncoding.EncodeToString([]byte("---KELOS_OUTPUTS_START---\neditor-result: " + result + "\n---KELOS_OUTPUTS_END---"))}}}}}
 					_ = json.NewEncoder(w).Encode(body)
 				case "/repos/acme/repo/pulls/1":
 					head := "def"
@@ -221,9 +237,18 @@ func TestEditorResultAccounting(t *testing.T) {
 				t.Fatal(err)
 			}
 			for range 2 {
-				err = editor.Poll(context.Background(), gh, kube, []string{"acme/repo"}, editor.Config{Namespace: "agents"}, "controller")
+				err = editor.Poll(context.Background(), gh, review.NewCache(), kube, []string{"acme/repo"}, editor.Config{Namespace: "agents"}, "controller")
 				if (err != nil) != tc.wantError {
 					t.Fatalf("unexpected error %v", err)
+				}
+			}
+			if !tc.wantError {
+				// The second poll must not validate the recorded Task again.
+				if !recorded {
+					t.Fatal("consumed Task was not marked as recorded")
+				}
+				if got := requests["GET /repos/acme/repo/compare/abc...def"]; got != 1 {
+					t.Fatalf("result validated %d times, want 1", got)
 				}
 			}
 			want := 1

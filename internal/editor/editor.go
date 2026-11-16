@@ -18,6 +18,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/dynamic"
 
 	"github.com/hearthctl/kelos-orchestrator/internal/feedback"
@@ -31,6 +32,9 @@ type Config struct {
 	AgentConfig string            `json:"agentConfig"`
 	Secret      string            `json:"secret"`
 }
+
+// recordedAnnotation marks an editor Task whose result is fully processed.
+const recordedAnnotation = "orchestrator.kelos.dev/result-recorded"
 
 // maxReviewRounds bounds the editor Tasks started for OCR findings on one PR.
 const maxReviewRounds = 5
@@ -83,7 +87,7 @@ func (r Result) Validate(a Assignment) error {
 	return nil
 }
 
-func Poll(ctx context.Context, c *github.Client, k dynamic.Interface, repositories []string, config Config, controllerLogin string) error {
+func Poll(ctx context.Context, c *github.Client, cache *review.Cache, k dynamic.Interface, repositories []string, config Config, controllerLogin string) error {
 	var failures []error
 	for _, repository := range repositories {
 		owner, repo, _ := strings.Cut(repository, "/")
@@ -104,7 +108,7 @@ func Poll(ctx context.Context, c *github.Client, k dynamic.Interface, repositori
 				if !enrolled {
 					continue
 				}
-				if err := reconcile(ctx, c, k, config, owner, repo, pr, controllerLogin); err != nil {
+				if err := reconcile(ctx, c, cache, k, config, owner, repo, pr, controllerLogin); err != nil {
 					failures = append(failures, fmt.Errorf("%s#%d: %w", repository, pr.GetNumber(), err))
 				}
 			}
@@ -117,7 +121,7 @@ func Poll(ctx context.Context, c *github.Client, k dynamic.Interface, repositori
 	return errors.Join(failures...)
 }
 
-func reconcile(ctx context.Context, c *github.Client, k dynamic.Interface, config Config, owner, repo string, pr *github.PullRequest, controllerLogin string) error {
+func reconcile(ctx context.Context, c *github.Client, cache *review.Cache, k dynamic.Interface, config Config, owner, repo string, pr *github.PullRequest, controllerLogin string) error {
 	resource := k.Resource(tasks).Namespace(config.Namespace)
 	key := fmt.Sprintf("%x", sha256.Sum256([]byte(fmt.Sprintf("%s/%s#%d", owner, repo, pr.GetNumber()))))[:32]
 	existing, err := resource.List(ctx, metav1.ListOptions{LabelSelector: "orchestrator.kelos.dev/pr=" + key})
@@ -147,9 +151,6 @@ func reconcile(ctx context.Context, c *github.Client, k dynamic.Interface, confi
 		if phase != "Succeeded" {
 			return nil
 		}
-		if err := consume(ctx, c, owner, repo, pr, task, controllerLogin); err != nil {
-			return reportFailure(ctx, c, owner, repo, pr, task, controllerLogin, err)
-		}
 		var assignment Assignment
 		if err := json.Unmarshal([]byte(task.GetAnnotations()["orchestrator.kelos.dev/assignment"]), &assignment); err != nil {
 			return err
@@ -157,22 +158,31 @@ func reconcile(ctx context.Context, c *github.Client, k dynamic.Interface, confi
 		for _, f := range assignment.Findings {
 			handled[f.ID] = true
 		}
+		// A recorded result was validated, answered and receipted on an
+		// earlier poll; doing it again would only cost GitHub requests.
+		if task.GetAnnotations()[recordedAnnotation] == "true" {
+			continue
+		}
+		if err := consume(ctx, c, owner, repo, pr, task, controllerLogin); err != nil {
+			return reportFailure(ctx, c, owner, repo, pr, task, controllerLogin, err)
+		}
 		// consume succeeded, so every finding is fixed or already satisfied.
 		// The receipt lets review completion count them as addressed.
 		ids := []string{}
 		for _, f := range assignment.Findings {
 			ids = append(ids, f.ID)
 		}
-		if len(ids) > 0 {
-			result, err := taskResult(task)
-			if err != nil {
-				return err
-			}
-			if err := feedback.Record(ctx, c, owner, repo, pr.GetNumber(), result.Commit, controllerLogin, task.GetName(), ids); err != nil {
-				return err
-			}
+		result, err := taskResult(task)
+		if err != nil {
+			return err
 		}
-
+		if err := feedback.Record(ctx, c, owner, repo, pr.GetNumber(), result.Commit, controllerLogin, task.GetName(), ids); err != nil {
+			return err
+		}
+		patch := []byte(`{"metadata":{"annotations":{"` + recordedAnnotation + `":"true"}}}`)
+		if _, err := resource.Patch(ctx, task.GetName(), types.MergePatchType, patch, metav1.PatchOptions{}); err != nil {
+			return err
+		}
 	}
 	pending := human[:0]
 	for _, f := range human {
@@ -190,7 +200,7 @@ func reconcile(ctx context.Context, c *github.Client, k dynamic.Interface, confi
 		name := "editor-" + key + "-" + fmt.Sprintf("%x", sha256.Sum256(encoded))[:16]
 		return create(ctx, c, k, config, owner, repo, pr, assignment, key, name)
 	}
-	evidence, err := review.CurrentEvidence(ctx, c, owner, repo, pr, controllerLogin)
+	evidence, err := review.CurrentEvidence(ctx, c, cache, owner, repo, pr, controllerLogin)
 	if err != nil || evidence == nil {
 		return err
 	}

@@ -10,6 +10,7 @@ import (
 	"github.com/google/go-github/v80/github"
 
 	merge "github.com/hearthctl/kelos-orchestrator/internal/merge"
+	"github.com/hearthctl/kelos-orchestrator/internal/review"
 )
 
 func TestUnavailableDiscoveryNeverMutates(t *testing.T) {
@@ -24,7 +25,7 @@ func TestUnavailableDiscoveryNeverMutates(t *testing.T) {
 			defer s.Close()
 			c := github.NewClient(s.Client())
 			c.BaseURL, _ = url.Parse(s.URL + "/")
-			if err := merge.Poll(context.Background(), c, []string{"hearthctl/kelos-orchestrator"}, "controller"); err == nil {
+			if err := merge.Poll(context.Background(), c, review.NewCache(), []string{"hearthctl/kelos-orchestrator"}, "controller"); err == nil {
 				t.Fatal("expected unavailable evidence error")
 			}
 		})

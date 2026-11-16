@@ -26,7 +26,7 @@ func TestPollEmptyRepository(t *testing.T) {
 	defer server.Close()
 	client := github.NewClient(server.Client())
 	client.BaseURL, _ = url.Parse(server.URL + "/")
-	if err := review.Poll(context.Background(), client, []string{"owner/repo"}, "controller"); err != nil {
+	if err := review.Poll(context.Background(), client, review.NewCache(), []string{"owner/repo"}, "controller"); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -79,7 +79,7 @@ func TestMissingEvidenceWithdrawsCompletion(t *testing.T) {
 			defer server.Close()
 			client := github.NewClient(server.Client())
 			client.BaseURL, _ = url.Parse(server.URL + "/")
-			if err := review.Poll(context.Background(), client, []string{"owner/repo"}, "controller"); (err != nil) != tc.failComment {
+			if err := review.Poll(context.Background(), client, review.NewCache(), []string{"owner/repo"}, "controller"); (err != nil) != tc.failComment {
 				t.Fatalf("poll error: %v", err)
 			}
 			want := []string{"DELETE /repos/owner/repo/issues/1/labels/review-done", "POST /repos/owner/repo/issues/1/comments"}

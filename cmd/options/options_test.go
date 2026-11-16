@@ -5,8 +5,12 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/pem"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 )
 
@@ -147,5 +151,51 @@ func TestValidateImplementation(t *testing.T) {
 				t.Fatalf("Validate() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
+	}
+}
+
+func TestGitHubClientRevalidatesRepeatedReads(t *testing.T) {
+	var validators []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		validators = append(validators, r.Header.Get("If-None-Match"))
+		w.Header().Set("X-RateLimit-Remaining", "4321")
+		// GitHub allows a minute of reuse; the client must still ask every time.
+		w.Header().Set("Cache-Control", "private, max-age=60")
+		w.Header().Set("ETag", `"v1"`)
+		if r.Header.Get("If-None-Match") == `"v1"` {
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
+		_, _ = w.Write([]byte(`{"number":1}`))
+	}))
+	defer server.Close()
+
+	client, meter := newHTTPClient(http.DefaultTransport)
+	var bodies []string
+	for range 3 {
+		response, err := client.Get(server.URL + "/repos/owner/repo/pulls/1")
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, err := io.ReadAll(response.Body)
+		_ = response.Body.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		bodies = append(bodies, string(body))
+	}
+
+	if want := []string{"", `"v1"`, `"v1"`}; !slices.Equal(validators, want) {
+		t.Fatalf("validators sent = %q, want %q", validators, want)
+	}
+	if want := []string{`{"number":1}`, `{"number":1}`, `{"number":1}`}; !slices.Equal(bodies, want) {
+		t.Fatalf("bodies = %q, want %q", bodies, want)
+	}
+	requests, notModified, remaining := meter.reset()
+	if requests != 3 || notModified != 2 || remaining != "4321" {
+		t.Fatalf("meter = %d requests, %d not modified, %q remaining; want 3, 2, 4321", requests, notModified, remaining)
+	}
+	if requests, notModified, _ := meter.reset(); requests != 0 || notModified != 0 {
+		t.Fatalf("meter after reset = %d requests, %d not modified; want 0, 0", requests, notModified)
 	}
 }

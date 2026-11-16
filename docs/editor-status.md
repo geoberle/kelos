@@ -4,7 +4,9 @@ Optional `configuration.editor` enables Task scheduling with `namespace`,
 `workspaces`, `agentConfig`, and `secret` (Codex API-key Secret name). Each is required;
 `controllerLogin` must also be configured. `workspaces` maps every configured
 repository (`owner/repo`) to its Kelos Workspace. The namespace, Workspaces,
-AgentConfig, and Secret must already exist. The Role allows only reading and creating Tasks.
+AgentConfig, and Secret must already exist. The Role allows reading, creating and patching
+Tasks; a Task whose result is validated, answered and receipted is annotated
+`orchestrator.kelos.dev/result-recorded: "true"` and not processed again.
 No live installation is enabled by default.
 
 The direct client-go v0.34.1 dynamic client uses Kelos v1alpha2 Task resources,
