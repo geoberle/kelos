@@ -173,8 +173,7 @@ explicit operational consideration; the implementation gpt-6.1-sol/high and
 1 CPU/2Gi requests do not carry over to Go-created Tasks.
 
 Before enabling scheduling, install these resources and Secrets, run one Go
-controller with its Task read/create RBAC, verify administrator-enforced classic
-branch protection forbids force pushes and deletion, and provide working OCR
+controller with its Task read/create RBAC, and provide working OCR
 on ARC for editor pushes. Permit the outbound endpoints listed above and ensure
 the pinned worker image can run repository checks. Keep Tasks and recoverable
 worker evidence; no TTL is introduced.

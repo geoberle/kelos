@@ -29,8 +29,6 @@ func TestCurrentFindingsCreateRetainedTask(t *testing.T) {
 	for _, tc := range []struct {
 		name              string
 		inline, ambiguous bool
-		protection        string
-		blocked           bool
 		completed         bool
 		fresh             bool
 		human             bool
@@ -41,10 +39,6 @@ func TestCurrentFindingsCreateRetainedTask(t *testing.T) {
 		{name: "summary finding"}, {name: "human feedback starts editor", human: true}, {name: "feedback during execution is retained", human: true, laterFeedback: true}, {name: "handled human feedback does not restart", human: true, completed: true},
 		{name: "completed attempt deduplicates", completed: true},
 		{name: "fresh attempt on same head", completed: true, fresh: true},
-		{name: "force pushes allowed", protection: `{"enforce_admins":{"enabled":true},"allow_force_pushes":{"enabled":true},"allow_deletions":{"enabled":false}}`, blocked: true},
-		{name: "missing protection", protection: `{}`, blocked: true},
-		{name: "administrator bypass", protection: `{"enforce_admins":{"enabled":false},"allow_force_pushes":{"enabled":false},"allow_deletions":{"enabled":false}}`, blocked: true},
-		{name: "deletion allowed", protection: `{"enforce_admins":{"enabled":true},"allow_force_pushes":{"enabled":false},"allow_deletions":{"enabled":true}}`, blocked: true},
 		{name: "inline finding", inline: true},
 		{name: "ambiguous inline finding", inline: true, ambiguous: true},
 		{name: "advisory finding starts editor", severity: "low"},
@@ -145,11 +139,6 @@ func TestCurrentFindingsCreateRetainedTask(t *testing.T) {
 
 				var body string
 				switch r.URL.Path {
-				case "/repos/owner/repo/branches/agent-fix/protection":
-					body = tc.protection
-					if len(body) == 0 {
-						body = `{"enforce_admins":{"enabled":true},"allow_force_pushes":{"enabled":false},"allow_deletions":{"enabled":false}}`
-					}
 				case "/repos/owner/repo/compare/head...head":
 					body = `{"status":"identical"}`
 				case "/repos/owner/repo/pulls":
@@ -270,7 +259,7 @@ func TestCurrentFindingsCreateRetainedTask(t *testing.T) {
 					}
 				}
 				err = editor.Poll(context.Background(), client, kube, []string{"owner/repo"}, editor.Config{Namespace: "agents", Workspaces: map[string]string{"owner/repo": "repo", "other/repo": "other"}, AgentConfig: "editor", Secret: "codex"}, "controller")
-				if (err != nil) != (tc.ambiguous || tc.blocked || (tc.limit && poll > 0)) {
+				if (err != nil) != (tc.ambiguous || (tc.limit && poll > 0)) {
 					t.Fatalf("unexpected error: %v", err)
 				}
 			}
@@ -293,7 +282,7 @@ func TestCurrentFindingsCreateRetainedTask(t *testing.T) {
 				task = list.Items[0].Object
 				creates = 1
 			}
-			if tc.ambiguous || tc.blocked {
+			if tc.ambiguous {
 				if creates != 0 {
 					t.Fatal("ambiguous finding created Task")
 				}

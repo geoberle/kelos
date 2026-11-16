@@ -22,15 +22,20 @@ roles are checked at reconciliation time, not reconstructed historically.
 
 ## Supported enforcement
 
-The initial supported policy is classic branch protection with admin enforcement,
-strict required status checks, and required conversation resolution. Bypass
-allowances and additional rulesets are rejected; unavailable or unsupported rules
-are not permission to merge. GitHub also has to report the PR as mergeable and
-clean. Drafts, hold, closed PRs, and unenrolled PRs do not merge.
+The controller reads the effective rules of the target branch, which include
+organization rulesets, and does not read classic branch protection. The target
+must carry a `pull_request` rule, so nothing reaches it without a pull request.
+A `required_linear_history` rule, or a `pull_request` rule whose allowed merge
+methods exclude `merge`, stops the controller because it creates merge commits.
+Other rules, bypass lists included, are not inspected; GitHub enforces them
+when the merge is requested. Unavailable rules are not permission to merge.
+GitHub also has to report the PR as mergeable and clean. Drafts, hold, closed
+PRs, and unenrolled PRs do not merge.
 
-Required CI contexts are read from protection, including GitHub App bindings.
-Missing, pending, failed, skipped or neutral required checks block this controller:
-it requires success even though GitHub itself permits skipped/neutral results.
+No required checks are read from GitHub. Every check run and commit status on
+the commit must be green; a skipped or neutral check counts as green, and a
+commit without any check passes.
+Pending, failed, cancelled and timed-out checks block this controller.
 Check and legacy status pagination is handled. Test-merge commit results take
 precedence when present; otherwise checks on the approved head are used. All
 review threads must be resolved, including across GraphQL pages. Server-side

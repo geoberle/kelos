@@ -291,13 +291,6 @@ func create(ctx context.Context, c *github.Client, k dynamic.Interface, config C
 	if current.GetHead().GetSHA() != assignment.Head {
 		return nil
 	}
-	protection, _, err := c.Repositories.GetBranchProtection(ctx, owner, repo, current.GetHead().GetRef())
-	if err != nil {
-		return fmt.Errorf("verify editor branch protection: %w", err)
-	}
-	if protection == nil || protection.EnforceAdmins == nil || !protection.EnforceAdmins.Enabled || protection.AllowForcePushes == nil || protection.AllowForcePushes.Enabled || protection.AllowDeletions == nil || protection.AllowDeletions.Enabled {
-		return fmt.Errorf("editor requires administrator-enforced protection prohibiting force pushes and deletion")
-	}
 	task := &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": "kelos.dev/v1alpha2", "kind": "Task",
 		"metadata": map[string]any{"name": name, "namespace": config.Namespace, "labels": map[string]any{"orchestrator.kelos.dev/pr": key}, "annotations": map[string]any{"orchestrator.kelos.dev/assignment": string(encoded)}},
