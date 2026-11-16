@@ -272,6 +272,10 @@ func evaluate(ctx context.Context, c *github.Client, owner, repo string, pr *git
 			if run.GetEvent() != "pull_request_target" || run.GetWorkflowID() != workflow.GetID() || run.GetPath() != ".github/workflows/ocr.yml" {
 				continue
 			}
+			// A skipped run reviewed nothing, such as one triggered by another label.
+			if run.GetConclusion() == "skipped" {
+				continue
+			}
 			if len(run.PullRequests) > 0 {
 				matches := false
 				for _, linked := range run.PullRequests {
