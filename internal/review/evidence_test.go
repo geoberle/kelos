@@ -229,7 +229,7 @@ func TestVerifiedReviewEvidence(t *testing.T) {
 					body = "[]"
 				}
 				if tc.name == "reassessment command does not become feedback" && r.URL.Path == "/repos/owner/repo/issues/1/comments" {
-					body = strings.TrimSuffix(body, "]") + `,{"id":80,"body":"reassess aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","user":{"id":100,"login":"geoberle"}}]`
+					body = strings.TrimSuffix(body, "]") + `,{"id":80,"body":"/reassess","user":{"id":100,"login":"geoberle"}}]`
 					body = strings.Replace(body, "[,", "[", 1)
 				}
 				if r.URL.Path == "/repos/owner/repo/issues/1/comments" && r.Method == "GET" {

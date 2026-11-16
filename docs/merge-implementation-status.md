@@ -5,10 +5,12 @@ opt-in through `configuration.mergeEnabled: true` and requires the dedicated
 `controllerLogin`. The chart leaves merging disabled until repository enforcement
 and credentials have been validated. No live merge has been performed during implementation.
 
-The authorized human, initially `geoberle`, posts `lgtm <full SHA>`. Whitespace
-around the command and hexadecimal case are normalized. The comment must be
-unedited, target the exact current head, and have a current admin or maintain
-repository role. A label alone is not approval. Human approval does not require
+The authorized human, initially `geoberle`, comments `/lgtm`. The command names
+no commit: the controller binds it to the PR head it first observes and records
+that commit. The approval counts only if a check suite shows the head was on
+its branch before the comment was created, so a push after the approval is not
+approved. The comment must be unedited and its author must have a current admin
+or maintain repository role. A label alone is not approval. Human approval does not require
 review-done. The controller writes a `kelos-merge/v1` record owned by its configured
 identity and displays the shared `lgtm` label.
 

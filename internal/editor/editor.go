@@ -478,7 +478,7 @@ func summaryCommentID(source, owner, repo string, number int) (int64, error) {
 
 func reportFailure(ctx context.Context, c *github.Client, owner, repo string, pr *github.PullRequest, task *unstructured.Unstructured, controller string, cause error) error {
 	marker := "<!-- kelos-editor-failure/v1 " + task.GetName() + " -->"
-	body := marker + "\nEditor Task " + task.GetName() + " requires human attention: " + cause.Error() + ". Preserve the retained Task, workspace, commits and pending feedback. Finish corrections manually, run CI and OCR, resolve review threads, then post a fresh authorized lgtm <full SHA>. No automatic retry."
+	body := marker + "\nEditor Task " + task.GetName() + " requires human attention: " + cause.Error() + ". Preserve the retained Task, workspace, commits and pending feedback. Finish corrections manually, run CI and OCR, resolve review threads, then comment /lgtm. No automatic retry."
 	opts := &github.IssueListCommentsOptions{ListOptions: github.ListOptions{PerPage: 100}}
 	for {
 		comments, response, err := c.Issues.ListComments(ctx, owner, repo, pr.GetNumber(), opts)

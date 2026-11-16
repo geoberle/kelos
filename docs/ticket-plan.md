@@ -109,8 +109,8 @@ Reference inspection: ARO-HCP's templatize commands use RawOptions.Validate → 
 - Create one correlated assessment Task, consume validated commit/recommendation/reason JSON, and maintain one assessment comment.
 - Use Codex investigation tools while leaving PR branch and GitHub state untouched by the assessor.
 - Reject invalid/stale output; recover correlation after restarts without repeated model requests.
-- New commits or authorized `reassess <full SHA>` comments permit reassessment; an unfavorable answer is not automatically retried.
-- Failed executions and malformed results require an authorized `reassess <full SHA>` comment targeting the current head. Persist request identity and perform no automatic retries on unchanged commits.
+- New commits or authorized `/reassess` comments permit reassessment; an unfavorable answer is not automatically retried.
+- Failed executions and malformed results require an authorized `/reassess` comment targeting the current head. Persist request identity and perform no automatic retries on unchanged commits.
 
 ## 9. Integrate published components into Hearth
 

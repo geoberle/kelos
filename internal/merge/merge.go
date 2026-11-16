@@ -3,7 +3,6 @@ package merge
 
 import (
 	"context"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -200,18 +199,17 @@ func authorize(ctx context.Context, c *github.Client, cache *review.Cache, owner
 	// Add every observed syntactically valid approval, including stale ones, so
 	// stale authorization cannot become valid when a branch returns to that SHA.
 	for id, comment := range sources {
-		sha := approvalSHA(comment.GetBody())
-		if len(sha) == 0 {
+		if !isApproval(comment.GetBody()) {
 			continue
 		}
 		if _, exists := records[id]; !exists {
-			records[id] = approvalRecord{ApprovalID: id, SHA: sha, Version: comment.GetUpdatedAt().Format(time.RFC3339Nano)}
+			records[id] = approvalRecord{ApprovalID: id, SHA: pr.GetHead().GetSHA(), Version: comment.GetUpdatedAt().Format(time.RFC3339Nano)}
 		}
 	}
 	var selected *github.IssueComment
 	for id, record := range records {
 		source := sources[id]
-		valid := !record.Invalidated && source != nil && record.SHA == pr.GetHead().GetSHA() && approvalSHA(source.GetBody()) == record.SHA && !source.GetCreatedAt().IsZero() && source.GetCreatedAt().Equal(source.GetUpdatedAt()) && record.Version == source.GetUpdatedAt().Format(time.RFC3339Nano)
+		valid := !record.Invalidated && source != nil && record.SHA == pr.GetHead().GetSHA() && isApproval(source.GetBody()) && !source.GetCreatedAt().IsZero() && source.GetCreatedAt().Equal(source.GetUpdatedAt()) && record.Version == source.GetUpdatedAt().Format(time.RFC3339Nano)
 		if valid {
 			for otherID, other := range sources {
 				if otherID != id && (other.GetUpdatedAt().IsZero() || !other.GetUpdatedAt().Before(source.GetCreatedAt().Time)) {
@@ -234,6 +232,15 @@ func authorize(ctx context.Context, c *github.Client, cache *review.Cache, owner
 				return nil, err
 			}
 			valid = !blocked
+		}
+		if valid {
+			// The command names no commit, so the head must demonstrably
+			// predate it; a push after the approval is not approved.
+			seen, err := headSeenBefore(ctx, c, owner, repo, pr, source.GetCreatedAt().Time)
+			if err != nil {
+				return nil, err
+			}
+			valid = seen
 		}
 		record.Invalidated = !valid
 		encoded, err := json.Marshal(record)
@@ -270,15 +277,35 @@ func authorize(ctx context.Context, c *github.Client, cache *review.Cache, owner
 	return selected, nil
 }
 
-func approvalSHA(body string) string {
-	fields := strings.Fields(body)
-	if len(fields) != 2 || fields[0] != "lgtm" || len(fields[1]) != 40 {
-		return ""
+// isApproval reports whether a comment is the human approval command. It
+// names no commit: the controller binds it to the PR head it first observes
+// and rejects it when anything was pushed after the comment was created.
+func isApproval(body string) bool {
+	return strings.TrimSpace(body) == "/lgtm"
+}
+
+// headSeenBefore reports whether the PR head was on its branch before the
+// given time. GitHub does not expose when a commit was pushed, but it creates
+// a check suite for the branch as soon as a workflow reacts to the push, so
+// the earliest suite marks the moment the head became reviewable. Without
+// such a suite nothing is proven and the answer is no.
+func headSeenBefore(ctx context.Context, c *github.Client, owner, repo string, pr *github.PullRequest, at time.Time) (bool, error) {
+	opts := &github.ListCheckSuiteOptions{ListOptions: github.ListOptions{PerPage: 100}}
+	for {
+		suites, res, err := c.Checks.ListCheckSuitesForRef(ctx, owner, repo, pr.GetHead().GetSHA(), opts)
+		if err != nil {
+			return false, err
+		}
+		for _, suite := range suites.CheckSuites {
+			if suite.GetHeadBranch() == pr.GetHead().GetRef() && !suite.GetCreatedAt().IsZero() && suite.GetCreatedAt().Before(at) {
+				return true, nil
+			}
+		}
+		if res.NextPage == 0 {
+			return false, nil
+		}
+		opts.Page = res.NextPage
 	}
-	if _, err := hex.DecodeString(fields[1]); err != nil {
-		return ""
-	}
-	return strings.ToLower(fields[1])
 }
 
 func laterReviewOrPush(ctx context.Context, c *github.Client, owner, repo string, number int, approved time.Time) (bool, error) {
