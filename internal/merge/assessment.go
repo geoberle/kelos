@@ -18,6 +18,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
 
+	"github.com/hearthctl/kelos-orchestrator/internal/feedback"
 	"github.com/hearthctl/kelos-orchestrator/internal/review"
 )
 
@@ -142,7 +143,7 @@ func writeAssessments(ctx context.Context, c *github.Client, owner, repo string,
 // isReassess reports whether a comment is the command that requests another
 // assessment. It names no commit; see assess for how it is bound to one.
 func isReassess(body string) bool {
-	return strings.TrimSpace(body) == "/reassess"
+	return feedback.HasCommand(body, feedback.ReassessCommand)
 }
 
 func assess(ctx context.Context, c *github.Client, cache *review.Cache, k dynamic.Interface, owner, repo string, listed *github.PullRequest, config AssessmentConfig, controller string) error {

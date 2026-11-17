@@ -26,7 +26,7 @@ Human-declared issue readiness, identified by `ready-for-agent`. Blocking prereq
 Issue admission granted after readiness and blocker checks, identified by `agent-start`.
 
 **Run command**:
-The issue comment `/kelos run` that starts an implementation Task. Issue admission posts it once; an authorized human posts it to retry a stopped Task.
+The issue comment `/kelos run` that starts an implementation Task. Issue admission posts it once; an authorized human posts it to retry a stopped Task. Kelos requires the command to be a whole line of the comment.
 
 **In progress**:
 An open issue whose implementation Task is running or has opened a pull request, identified by `kelos-in-progress`.

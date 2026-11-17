@@ -24,8 +24,9 @@ func List(ctx context.Context, c *github.Client, owner, repo string, number int)
 		if len(strings.TrimSpace(body)) == 0 {
 			return
 		}
-		// Control commands are not repair requests.
-		if command := strings.TrimSpace(body); command == "/lgtm" || command == "/reassess" {
+		// A comment that carries a control command is not a repair request,
+		// whatever else it says.
+		if HasCommand(body, ApproveCommand) || HasCommand(body, ReassessCommand) {
 			return
 		}
 		hash := sha256.Sum256([]byte(version + "\n" + body))
