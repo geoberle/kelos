@@ -102,6 +102,10 @@ type identity struct {
 	Head       string `json:"head"`
 	Base       string `json:"base"`
 }
+
+// binaryReason is OCR's exclude reason for a file it cannot read as text.
+const binaryReason = "binary"
+
 type item struct {
 	ID   string `json:"item_id"`
 	Path string `json:"path"`
@@ -425,13 +429,21 @@ func evaluate(ctx context.Context, c *github.Client, cache *Cache, owner, repo s
 				return outcome{Reason: "Review range is stale."}, nil
 			}
 			// OCR excludes deleted files because they have no content to
-			// review. Any other exclusion is a coverage gap.
-			deleted := map[string]bool{}
+			// review, and binary files because a code review cannot read
+			// them; the assessment is told about the latter. Any other
+			// exclusion is a coverage gap.
+			deleted, binary := map[string]bool{}, map[string]bool{}
 			for _, i := range cov.Excluded {
-				if i.ExcludeReason != "deleted" || len(i.Path) == 0 {
+				switch {
+				case len(i.Path) == 0:
+					return outcome{Reason: "Coverage incomplete or excluded; human attention required."}, nil
+				case i.ExcludeReason == "deleted":
+					deleted[i.Path] = true
+				case i.ExcludeReason == binaryReason:
+					binary[i.Path] = true
+				default:
 					return outcome{Reason: "Coverage incomplete or excluded; human attention required."}, nil
 				}
-				deleted[i.Path] = true
 			}
 			paths := map[string]bool{}
 			for _, i := range cov.Selected {
@@ -452,6 +464,12 @@ func evaluate(ctx context.Context, c *github.Client, cache *Cache, owner, repo s
 						delete(deleted, file.GetFilename())
 						continue
 					}
+					// A binary file claimed by OCR counts only when GitHub
+					// has no text diff for the same file.
+					if binary[file.GetFilename()] && len(file.GetPatch()) == 0 {
+						delete(binary, file.GetFilename())
+						continue
+					}
 					if !paths[file.GetFilename()] {
 						return outcome{Reason: "Changed file omitted from review coverage."}, nil
 					}
@@ -462,7 +480,7 @@ func evaluate(ctx context.Context, c *github.Client, cache *Cache, owner, repo s
 				}
 				fileOptions.Page = response.NextPage
 			}
-			if len(paths) > 0 || len(deleted) > 0 || fileCount >= 3000 {
+			if len(paths) > 0 || len(deleted) > 0 || len(binary) > 0 || fileCount >= 3000 {
 				return outcome{Reason: "Coverage cannot be verified."}, nil
 			}
 			selected := map[string]string{}
@@ -679,6 +697,23 @@ func decodeEvidence(data []byte, target any) error {
 		return fmt.Errorf("trailing JSON data")
 	}
 	return json.Unmarshal(data, target)
+}
+
+// Unreviewed returns the binary files of the PR that the current review
+// evidence excludes, using this poll's shared evaluation. A code review
+// cannot read them, so the assessment has to judge them.
+func Unreviewed(ctx context.Context, c *github.Client, cache *Cache, owner, repo string, pr *github.PullRequest, controllerLogin string) ([]string, error) {
+	decision, err := cache.evaluation(ctx, c, owner, repo, pr, controllerLogin)
+	if err != nil || decision.Evidence == nil {
+		return nil, err
+	}
+	var paths []string
+	for _, i := range decision.Evidence.Result.Manifest.Coverage.Excluded {
+		if i.ExcludeReason == binaryReason {
+			paths = append(paths, i.Path)
+		}
+	}
+	return paths, nil
 }
 
 // CurrentEvidence revalidates the trusted workflow and returns current findings.

@@ -40,7 +40,11 @@ inspect excluded/waived entries and do not authorize completion if relevant
 changed tests/goldens or source were omitted without human acceptance. Deleted
 files are excluded with `exclude_reason: deleted` because they have no content
 to review; the consumer accepts such an entry only when GitHub reports the same
-file as removed in the pull request.
+file as removed in the pull request. Binary files are excluded with
+`exclude_reason: binary`; the consumer accepts such an entry only when GitHub
+has no text diff for the same file, and the merge assessment is told to judge
+those files (ADR 0018). Every other exclusion, such as a secret or an oversized
+file, still stops completion.
 
 Consumer contract:
 
