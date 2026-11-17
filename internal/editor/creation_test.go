@@ -198,6 +198,8 @@ func TestCurrentFindingsCreateRetainedTask(t *testing.T) {
 					body = string(encoded)
 				case "/repos/owner/repo/collaborators/geoberle/permission":
 					body = `{"role_name":"admin"}`
+				case "/repos/owner/repo/commits/head/check-runs":
+					body = `{"total_count":0,"check_runs":[]}`
 				case "/repos/owner/repo/pulls/1/reviews":
 					body = "[]"
 					if r.Method == "POST" {

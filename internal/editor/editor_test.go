@@ -220,6 +220,8 @@ func TestEditorResultAccounting(t *testing.T) {
 					}
 				case "/repos/acme/repo/pulls/1/reviews":
 					_, _ = w.Write([]byte(`[]`))
+				case "/repos/acme/repo/commits/abc/check-runs":
+					_, _ = w.Write([]byte(`{"total_count":0,"check_runs":[]}`))
 				case "/repos/acme/repo/actions/workflows/ocr.yml":
 					_, _ = w.Write([]byte(`{"id":8}`))
 				case "/repos/acme/repo/actions/workflows/8/runs":

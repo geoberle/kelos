@@ -18,6 +18,16 @@ or needs-human Task prevents further scheduling for that PR. Different PRs have
 independent Tasks. Fully accounted successful results allow a new head's verified
 OCR findings to start another Task, for at most five rounds per PR.
 
+A failed `verify` check on the current head is editor work too. The controller
+reads the newest `verify` check run of the head; when it completed with
+`failure`, it starts a Task whose single finding carries the last 60 lines of
+the failing job's log up to its final error. The controller fetches the log
+because the editor's GitHub identity cannot read workflow logs. The finding ID
+is `check/<owner>/<repo>/<pr>/<check run>`, so one failed run is assigned once;
+a repair that fails again is a new run and a new Task, for at most three per
+PR. Human feedback is handled first, a failed check before OCR findings. A red
+`verify-base` status is not repaired.
+
 The prompt requires editing from the assigned head, a remote-head recheck, and
 regular push only. Divergence stops work and preserves the workspace; no force
 push or rebase onto human work is allowed. These are agent execution instructions,
