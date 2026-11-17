@@ -5,7 +5,8 @@ opt-in through `configuration.mergeEnabled: true` and requires the dedicated
 `controllerLogin`. The chart leaves merging disabled until repository enforcement
 and credentials have been validated. No live merge has been performed during implementation.
 
-The authorized human, initially `geoberle`, comments `/lgtm`. The command names
+The authorized human, initially `geoberle`, comments `/lgtm`, alone or as the
+start of any line of a comment. The command names
 no commit: the controller binds it to the PR head it first observes and records
 that commit. The approval counts only if GitHub's push log for the branch shows
 the head was put there before the comment and nothing was pushed since, so a

@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/go-github/v80/github"
 
+	"github.com/hearthctl/kelos-orchestrator/internal/feedback"
 	"github.com/hearthctl/kelos-orchestrator/internal/review"
 )
 
@@ -308,7 +309,7 @@ func authorize(ctx context.Context, c *github.Client, cache *review.Cache, owner
 // names no commit: the controller binds it to the PR head it first observes
 // and rejects it when anything was pushed after the comment was created.
 func isApproval(body string) bool {
-	return strings.TrimSpace(body) == "/lgtm"
+	return feedback.Approves(body)
 }
 
 // headSince reports whether the PR head has been the tip of its branch since

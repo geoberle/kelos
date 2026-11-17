@@ -2,9 +2,12 @@
 
 The editor polls ordinary conversation comments, inline comments and submitted
 review bodies from `geoberle`, checking the current admin/maintain role before
-admitting new requests. Empty text, bot reports and exact `/lgtm` or
-`/reassess` control commands are not repair requests. OCR findings
-remain on their separate verified-artifact path.
+admitting new requests. Empty text, bot reports and comments that carry a
+control command are not repair requests. A comment carries `/lgtm` or
+`/reassess` when one of its lines starts with the command as its first word;
+whatever else the comment says is a remark, not a request. A comment with a
+`/lgtm cancel` line, Prow's withdrawal, never approves. OCR findings remain on
+their separate verified-artifact path.
 
 Each observed request receives an identity containing its source kind, GitHub ID
 and a digest of its version and text. The dedicated controller persists the
