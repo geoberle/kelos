@@ -35,13 +35,35 @@ GitHub also has to report the PR as mergeable and clean. Drafts, hold, closed
 PRs, and unenrolled PRs do not merge.
 
 No required checks are read from GitHub. Every check run and commit status on
-the commit must be green; a skipped or neutral check counts as green, and a
-commit without any check passes.
+the commit must be green; a skipped or neutral check counts as green. The
+`verify-base` status is judged by the gate below instead.
 Pending, failed, cancelled and timed-out checks block this controller.
 Check and legacy status pagination is handled. Test-merge commit results take
 precedence when present; otherwise checks on the approved head are used. All
 review threads must be resolved, including across GraphQL pages. Server-side
 protection remains active when the merge request arrives.
+
+## Verify on the current base
+
+The last gate requires `verify` to have passed for the head on the commit the
+base branch points to now (ADR 0015). The controller keeps the result as the
+commit status `verify-base` on the head; its description ends in
+` BaseSHA:<commit>` and it links the workflow run. Statuses of that name written
+by another identity are ignored.
+
+Without a result for the current base, the controller dispatches `ci.yml` on
+the base branch with `head` and `base` inputs and writes the pending status.
+While the run is unfinished the pull request waits and keeps its approval and
+`lgtm`. A finished run is written as success or failure; a success merges on
+the next poll, a failure blocks until the head or the base changes. One pull
+request per base branch is verified at a time, the lowest number first.
+
+A pull request that conflicts with its base gets the `needs-rebase` label,
+which is removed when the conflict is gone. It is neither verified nor merged.
+
+The controller app needs "Actions: write" to dispatch the workflow and "Commit
+statuses: write" to record the result. Each target repository needs a `ci.yml`
+that accepts the dispatch.
 
 The controller rechecks protection, CI, threads, approval, head and mutable PR
 flags before submitting `merge_method: merge` with the approved `sha`. It never

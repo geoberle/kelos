@@ -1,0 +1,3 @@
+PUT /repos/owner/repo/pulls/1/merge {"merge_method":"merge","sha":"1111111111111111111111111111111111111111"}
+POST /repos/owner/repo/actions/workflows/ci.yml/dispatches {"inputs":{"base":"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee","head":"2222222222222222222222222222222222222222"},"ref":"main","return_run_details":true}
+POST /repos/owner/repo/statuses/2222222222222222222222222222222222222222 {"context":"verify-base","description":"verify is running BaseSHA:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee","state":"pending","target_url":"https://github.com/owner/repo/actions/runs/9"}

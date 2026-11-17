@@ -27,6 +27,10 @@ func Poll(ctx context.Context, c *github.Client, cache *review.Cache, repositori
 			return errors.New("invalid repository")
 		}
 		opts := &github.PullRequestListOptions{State: "open", ListOptions: github.ListOptions{PerPage: 100}}
+		// Per base branch: whether a verify run is under way, and the oldest
+		// pull request without a verify result for the current base.
+		verifying := map[string]bool{}
+		unverified := map[string]*github.PullRequest{}
 		for {
 			prs, response, err := c.PullRequests.List(ctx, owner, repo, opts)
 			if err != nil {
@@ -37,7 +41,16 @@ func Poll(ctx context.Context, c *github.Client, cache *review.Cache, repositori
 				if !label(pr, "agent-managed") {
 					continue
 				}
-				if err := reconcile(ctx, c, cache, owner, repo, pr.GetNumber(), controller); err != nil {
+				err := reconcile(ctx, c, cache, owner, repo, pr.GetNumber(), controller)
+				branch := pr.GetBase().GetRef()
+				switch {
+				case errors.Is(err, errVerifying):
+					verifying[branch] = true
+				case errors.Is(err, errUnverified):
+					if oldest := unverified[branch]; oldest == nil || pr.GetNumber() < oldest.GetNumber() {
+						unverified[branch] = pr
+					}
+				case err != nil:
 					failures = append(failures, fmt.Errorf("%s#%d: %w", repository, pr.GetNumber(), err))
 				}
 			}
@@ -45,6 +58,16 @@ func Poll(ctx context.Context, c *github.Client, cache *review.Cache, repositori
 				break
 			}
 			opts.Page = response.NextPage
+		}
+		// As Tide does, verify one pull request per base branch at a time:
+		// each merge moves the base and would outdate every other run.
+		for branch, pr := range unverified {
+			if verifying[branch] {
+				continue
+			}
+			if err := retest(ctx, c, owner, repo, pr); err != nil {
+				failures = append(failures, fmt.Errorf("%s#%d: %w", repository, pr.GetNumber(), err))
+			}
 		}
 	}
 	return errors.Join(failures...)
@@ -67,6 +90,9 @@ func reconcile(ctx context.Context, c *github.Client, cache *review.Cache, owner
 	if pr.GetMerged() {
 		return nil
 	}
+	if err := reportConflict(ctx, c, owner, repo, pr); err != nil {
+		return err
+	}
 	approval, err := authorize(ctx, c, cache, owner, repo, pr, controller)
 	// An unfinished review run decides nothing: keep the approval, merge later.
 	if errors.Is(err, review.ErrWaiting) {
@@ -80,7 +106,7 @@ func reconcile(ctx context.Context, c *github.Client, cache *review.Cache, owner
 			return err
 		}
 	}
-	if err := gates(ctx, c, owner, repo, pr); err != nil {
+	if err := gates(ctx, c, owner, repo, pr, controller); err != nil {
 		return err
 	}
 	current, _, err := c.PullRequests.Get(ctx, owner, repo, number)
@@ -94,7 +120,7 @@ func reconcile(ctx context.Context, c *github.Client, cache *review.Cache, owner
 	if err != nil || latest == nil || latest.GetID() != approval.GetID() || current.GetHead().GetSHA() != pr.GetHead().GetSHA() {
 		return errors.Join(err, withdraw(ctx, c, owner, repo, current))
 	}
-	if err := gates(ctx, c, owner, repo, current); err != nil {
+	if err := gates(ctx, c, owner, repo, current, controller); err != nil {
 		return err
 	}
 	// Re-read approval and mutable PR flags after the slower protection/CI reads.

@@ -37,6 +37,12 @@ The checks every repository runs with `make verify`, needing no infrastructure b
 **E2E**:
 The optional checks a repository runs with `make e2e` because they need infrastructure an agent pod lacks. Only CI runs them, as part of the `verify` check.
 
+**Tested base**:
+The commit of the base branch a `verify` run merged a pull request head onto. A pull request merges only when `verify` passed on the commit its base branch points to now.
+
+**Needs rebase**:
+A pull request that conflicts with its base branch, identified by `needs-rebase`. It is not verified or merged until its branch is updated.
+
 **Must-fix finding**:
 A demonstrated correctness, security, compatibility, or operational problem, or a material violation of an agreed requirement. The only kind of finding the reviewer is asked to report.
 

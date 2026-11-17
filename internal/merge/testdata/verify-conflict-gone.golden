@@ -1,0 +1,3 @@
+DELETE /repos/owner/repo/issues/1/labels/needs-rebase
+POST /repos/owner/repo/actions/workflows/ci.yml/dispatches {"inputs":{"base":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","head":"1111111111111111111111111111111111111111"},"ref":"main","return_run_details":true}
+POST /repos/owner/repo/statuses/1111111111111111111111111111111111111111 {"context":"verify-base","description":"verify is running BaseSHA:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","state":"pending","target_url":"https://github.com/owner/repo/actions/runs/9"}

@@ -1,5 +1,15 @@
 name: CI
-on: pull_request
+on:
+  pull_request:
+  # The orchestrator verifies a pull request head on the current base commit.
+  workflow_dispatch:
+    inputs:
+      head:
+        description: Pull request head commit
+        required: true
+      base:
+        description: Base commit to merge it onto
+        required: true
 permissions:
   contents: read
 jobs:
@@ -7,6 +17,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: hearthctl/.github/checkout@main
+        with:
+          head: ${{ inputs.head }}
+          base: ${{ inputs.base }}
       - uses: actions/setup-go@v5
         with:
           go-version: '1.25.5'
@@ -15,6 +28,7 @@ jobs:
           version: v3.19.2
       - uses: hearthctl/.github/verify@main
   image:
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

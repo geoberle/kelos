@@ -1,0 +1,2 @@
+POST /repos/owner/repo/issues/1/labels ["needs-rebase"]
+error: owner/repo#1: PR is not ready to merge

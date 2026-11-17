@@ -1,0 +1,1 @@
+PUT /repos/owner/repo/pulls/1/merge {"merge_method":"merge","sha":"1111111111111111111111111111111111111111"}

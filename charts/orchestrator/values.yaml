@@ -11,6 +11,8 @@ configuration:
   # Dedicated GitHub identity; empty keeps review reconciliation disabled.
   controllerLogin: ""
   # Enable only after target repository enforcement has been verified.
+  # Merging needs the app permissions "Actions: write" and "Commit statuses:
+  # write", which verify a pull request on the current base.
   mergeEnabled: false
 resources:
   requests:

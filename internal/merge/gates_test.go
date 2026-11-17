@@ -262,10 +262,14 @@ func TestGuardedMerge(t *testing.T) {
 					case "branch without a push log entry for the head is not approved":
 						body = `[{"activity_type":"push","ref":"refs/heads/agent-fix","after":"` + strings.Repeat("d", 40) + `","timestamp":"2026-11-15T09:00:00Z"}]`
 					}
+				case "/repos/owner/repo/git/ref/heads/main":
+					body = `{"ref":"refs/heads/main","object":{"type":"commit","sha":"` + strings.Repeat("e", 40) + `"}}`
 				case "/repos/owner/repo/commits/" + sha + "/statuses":
-					body = `[]`
+					// The controller's verify result for the head on the current base.
+					verified := `{"context":"verify-base","state":"success","description":"verify passed BaseSHA:` + strings.Repeat("e", 40) + `","creator":{"id":90}}`
+					body = `[` + verified + `]`
 					if tc.name == "failed commit status blocks merge" {
-						body = `[{"context":"legacy","state":"failure"}]`
+						body = `[{"context":"legacy","state":"failure"},` + verified + `]`
 					}
 				default:
 					t.Errorf("unexpected %s %s", r.Method, r.URL)
