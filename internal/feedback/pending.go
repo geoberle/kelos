@@ -19,6 +19,10 @@ type receipt struct {
 
 const observedMarker = "<!-- kelos-feedback/v1 -->\n"
 
+// dismissedMarker starts the notice that an approval dismissed requests; the
+// ID of the approval comment follows it.
+const dismissedMarker = "<!-- kelos-dismissed-feedback/v1 "
+
 // Pending preserves observed requests even if their original comments disappear.
 // A controller-owned observation is task input, never merge authorization.
 func Pending(ctx context.Context, c *github.Client, owner, repo string, number int, head, controller string) ([]Finding, error) {
@@ -32,6 +36,10 @@ func Pending(ctx context.Context, c *github.Client, owner, repo string, number i
 	pending := []Finding{}
 	seen := map[string]bool{}
 	var receipts []receipt
+	// approval is the human's newest approval; notices are the dismissals
+	// already announced.
+	var approval *github.IssueComment
+	var notices []string
 	opts := &github.IssueListCommentsOptions{ListOptions: github.ListOptions{PerPage: 100}}
 	for {
 		page, res, err := c.Issues.ListComments(ctx, owner, repo, number, opts)
@@ -39,6 +47,13 @@ func Pending(ctx context.Context, c *github.Client, owner, repo string, number i
 			return nil, err
 		}
 		for _, comment := range page {
+			// An edited comment is not an approval; see the merge package.
+			if comment.GetUser().GetLogin() == "geoberle" && Approves(comment.GetBody()) && !comment.GetCreatedAt().IsZero() && comment.GetCreatedAt().Equal(comment.GetUpdatedAt()) && (approval == nil || comment.GetCreatedAt().After(approval.GetCreatedAt().Time)) {
+				approval = comment
+			}
+			if comment.GetUser().GetLogin() == controller && strings.HasPrefix(comment.GetBody(), dismissedMarker) {
+				notices = append(notices, comment.GetBody())
+			}
 			if comment.GetUser().GetLogin() == controller && strings.HasPrefix(comment.GetBody(), handledMarker) {
 				var r receipt
 				if err := json.Unmarshal([]byte(strings.TrimPrefix(comment.GetBody(), handledMarker)), &r); err != nil {
@@ -60,6 +75,10 @@ func Pending(ctx context.Context, c *github.Client, owner, repo string, number i
 			for _, f := range findings {
 				if !strings.HasPrefix(f.ID, "human/") || len(strings.TrimSpace(f.Content)) == 0 {
 					return nil, fmt.Errorf("invalid retained feedback identity")
+				}
+				// A record without a time is as old as its observation.
+				if f.At.IsZero() {
+					f.At = comment.GetCreatedAt().Time
 				}
 				if !seen[f.ID] {
 					pending = append(pending, f)
@@ -118,7 +137,49 @@ func Pending(ctx context.Context, c *github.Client, owner, repo string, number i
 			unhandled = append(unhandled, f)
 		}
 	}
-	return unhandled, nil
+	return dismiss(ctx, c, owner, repo, number, unhandled, approval, notices)
+}
+
+// dismiss drops the requests the human wrote before their newest approval:
+// the latest word wins, and "merge it as it is" overrules an earlier request.
+// A request written after the approval stays, and withdraws that approval in
+// the merge package. The dismissal is announced once per approval.
+func dismiss(ctx context.Context, c *github.Client, owner, repo string, number int, pending []Finding, approval *github.IssueComment, notices []string) ([]Finding, error) {
+	if approval == nil {
+		return pending, nil
+	}
+	var kept, dismissed []Finding
+	for _, f := range pending {
+		if !f.At.IsZero() && f.At.Before(approval.GetCreatedAt().Time) {
+			dismissed = append(dismissed, f)
+		} else {
+			kept = append(kept, f)
+		}
+	}
+	if len(dismissed) == 0 {
+		return pending, nil
+	}
+	permission, _, err := c.Repositories.GetPermissionLevel(ctx, owner, repo, "geoberle")
+	if err != nil {
+		return nil, err
+	}
+	if permission.GetRoleName() != "admin" && permission.GetRoleName() != "maintain" {
+		return pending, nil
+	}
+	marker := fmt.Sprintf("%s%d -->", dismissedMarker, approval.GetID())
+	for _, notice := range notices {
+		if strings.HasPrefix(notice, marker) {
+			return kept, nil
+		}
+	}
+	body := marker + "\n[This approval](" + approval.GetHTMLURL() + ") is newer than the requests below, so they are dismissed and will not be worked on:\n"
+	for _, f := range dismissed {
+		body += "\n- [request](" + f.Source + ")"
+	}
+	if _, _, err := c.Issues.CreateComment(ctx, owner, repo, number, &github.IssueComment{Body: &body}); err != nil {
+		return nil, err
+	}
+	return kept, nil
 }
 
 // Handled returns the finding IDs that an editor addressed at exactly head,

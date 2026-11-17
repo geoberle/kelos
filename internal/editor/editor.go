@@ -141,10 +141,32 @@ func reconcile(ctx context.Context, c *github.Client, cache *review.Cache, k dyn
 			}
 		}
 	}
+	pendingHuman := map[string]bool{}
+	for _, f := range human {
+		pendingHuman[f.ID] = true
+	}
 	handled := map[string]bool{}
 	for i := range existing.Items {
 		task := &existing.Items[i]
 		phase, _, _ := unstructured.NestedString(task.Object, "status", "phase")
+		// A finished Task whose human requests are all gone, dismissed by a
+		// later approval or handled, has nothing left to answer and must not
+		// hold the pull request back.
+		if phase == "Failed" || phase == "Succeeded" {
+			gone, err := requestsGone(task, pendingHuman)
+			if err != nil {
+				return err
+			}
+			if gone {
+				if task.GetAnnotations()[recordedAnnotation] != "true" {
+					patch := []byte(`{"metadata":{"annotations":{"` + recordedAnnotation + `":"true"}}}`)
+					if _, err := resource.Patch(ctx, task.GetName(), types.MergePatchType, patch, metav1.PatchOptions{}); err != nil {
+						return err
+					}
+				}
+				continue
+			}
+		}
 		if phase == "Failed" {
 			return reportFailure(ctx, c, owner, repo, pr, task, controllerLogin, fmt.Errorf("editor execution failed"))
 		}
@@ -323,6 +345,21 @@ func reconcile(ctx context.Context, c *github.Client, cache *review.Cache, k dyn
 		return nil
 	}
 	return create(ctx, c, k, config, owner, repo, pr, assignment, key, name)
+}
+
+// requestsGone reports whether the Task was assigned only human requests and
+// none of them is pending any more.
+func requestsGone(task *unstructured.Unstructured, pending map[string]bool) (bool, error) {
+	var assignment Assignment
+	if err := json.Unmarshal([]byte(task.GetAnnotations()["orchestrator.kelos.dev/assignment"]), &assignment); err != nil {
+		return false, err
+	}
+	for _, f := range assignment.Findings {
+		if !strings.HasPrefix(f.ID, "human/") || pending[f.ID] {
+			return false, nil
+		}
+	}
+	return len(assignment.Findings) > 0, nil
 }
 
 func create(ctx context.Context, c *github.Client, k dynamic.Interface, config Config, owner, repo string, pr *github.PullRequest, assignment Assignment, key, name string) error {

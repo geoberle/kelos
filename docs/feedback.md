@@ -3,8 +3,8 @@
 The editor polls ordinary conversation comments, inline comments and submitted
 review bodies from `geoberle`, checking the current admin/maintain role before
 admitting new requests. Empty text, bot reports and comments that carry a
-control command are not repair requests. A comment carries `/lgtm` or
-`/reassess` when one of its lines starts with the command as its first word;
+control command are not repair requests. A comment carries `/lgtm`,
+`/reassess` or `/kelos run` when one of its lines starts with the command;
 whatever else the comment says is a remark, not a request. A comment with a
 `/lgtm cancel` line, Prow's withdrawal, never approves. OCR findings remain on
 their separate verified-artifact path.
@@ -15,6 +15,14 @@ request in a `kelos-feedback/v1` comment before scheduling work, including while
 an editor is already running. Editing a source creates a new version. Deleting a
 source does not erase an already observed request. Feedback posted and deleted
 entirely between polls cannot be recovered from GitHub's current-comment API.
+
+The latest word wins. A request the human wrote before their newest `/lgtm`
+is dismissed: it is no longer pending, starts no editor Task and withdraws no
+label, and the controller names the dismissed requests once in a
+`kelos-dismissed-feedback/v1` comment. A request written or edited after the
+approval stays pending and withdraws that approval. A finished editor Task
+whose requests are all gone is marked as recorded and no longer holds the pull
+request back.
 
 The existing editor handles pending requests on the current PR branch with one
 Task per PR at a time. Later requests remain pending. New pending feedback
