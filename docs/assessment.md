@@ -23,6 +23,11 @@ or `needs-human`, and the reason must be nonempty. Unknown/duplicate fields, tra
 malformed output and oversized results do not approve. Task success alone is
 not approval.
 
+A head that the human approved with a still valid `/lgtm` is not assessed: the
+decision is made, and an assessment would only repeat or contradict it. An
+explicit `/reassess` still starts one. A check that is still running on the
+commit is waited for and not logged as a failure.
+
 `needs-fix` is for a concrete defect in the change that the assessment can
 state with its trigger and consequence and that a code change can repair. The
 editor takes the reason as a finding, `assessment/<owner>/<repo>/<pr>/<task>`,

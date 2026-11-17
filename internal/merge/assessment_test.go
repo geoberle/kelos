@@ -33,9 +33,12 @@ func TestCleanReviewCreatesAssessment(t *testing.T) {
 		badOCR                        string
 		// binary makes the review exclude one binary file
 		binary bool
+		// approved puts a human approval of the head, recorded by the controller, on the pull request
+		approved bool
 	}{
 		{name: "clean current review creates retained assessment", state: "pending"},
 		{name: "binary file the review excluded is named in the assessment", state: "pending", binary: true},
+		{name: "head a human approved is not assessed", approved: true},
 		{name: "new head during publication invalidates approval", response: `{"commit":"head","recommendation":"approve","reason":"Tested."}`, state: "invalidated", changedHead: true},
 		{name: "later failed OCR invalidates approval", response: `{"commit":"head","recommendation":"approve","reason":"Tested."}`, state: "invalidated", badOCR: "failed"},
 		{name: "later skipped OCR invalidates approval", response: `{"commit":"head","recommendation":"approve","reason":"Tested."}`, state: "invalidated", badOCR: "skipped"},
@@ -243,6 +246,12 @@ func TestCleanReviewCreatesAssessment(t *testing.T) {
 						return
 					}
 					comments := append([]*github.IssueComment{}, savedComments...)
+					if tc.approved {
+						var human, record github.IssueComment
+						_ = json.Unmarshal([]byte(`{"id":300,"body":"/lgtm","user":{"login":"geoberle"},"created_at":"2026-11-15T10:00:00Z","updated_at":"2026-11-15T10:00:00Z"}`), &human)
+						_ = json.Unmarshal([]byte(`{"id":301,"body":"<!-- kelos-merge/v1 -->\n{\"approval_id\":300,\"sha\":\"`+sha+`\",\"version\":\"2026-11-15T10:00:00Z\",\"invalidated\":false}","user":{"login":"controller"}}`), &record)
+						comments = append(comments, &human, &record)
+					}
 					if requestVisible {
 						var command github.IssueComment
 						// A request counts only when it is newer than the assessment it answers.
@@ -309,6 +318,13 @@ func TestCleanReviewCreatesAssessment(t *testing.T) {
 				if err != nil {
 					t.Fatalf("unexpected error: %v", err)
 				}
+			}
+			if tc.approved {
+				// The human decided; an assessment would only repeat or contradict that.
+				if len(savedComments) != 0 || task != nil {
+					t.Fatalf("assessment started although a human approved: comments=%v task=%v", savedComments, task)
+				}
+				return
 			}
 			if approved != (tc.state == "approve") {
 				t.Fatalf("lgtm=%v for %s", approved, tc.state)
