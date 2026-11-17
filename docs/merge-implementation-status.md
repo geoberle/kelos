@@ -62,6 +62,12 @@ request per base branch is verified at a time, the lowest number first.
 A pull request that conflicts with its base gets the `needs-rebase` label,
 which is removed when the conflict is gone. It is neither verified nor merged.
 
+An approved pull request whose commit lacks a check the target branch requires
+cannot merge, and GitHub only reports it as blocked. The controller names the
+missing check once per head in a `kelos-merge-blocked/v1` comment. This happens
+to a branch that predates the workflow reporting the check; rebasing it onto
+the base fixes it.
+
 The controller app needs "Actions: write" to dispatch the workflow and "Commit
 statuses: write" to record the result. Each target repository needs a `ci.yml`
 that accepts the dispatch.

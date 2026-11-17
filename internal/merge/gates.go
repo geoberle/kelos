@@ -3,9 +3,11 @@ package merge
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/url"
 	"slices"
+	"strings"
 
 	"github.com/google/go-github/v80/github"
 )
@@ -18,6 +20,10 @@ func gates(ctx context.Context, c *github.Client, owner, repo string, pr *github
 		return fmt.Errorf("PR is not ready to merge")
 	}
 	if err := requiredCI(ctx, c, owner, repo, pr); err != nil {
+		var missing *missingCheck
+		if errors.As(err, &missing) {
+			return errors.Join(err, reportBlocked(ctx, c, owner, repo, pr, controller, missing))
+		}
 		return err
 	}
 	if err := resolvedThreads(ctx, c, owner, repo, pr.GetNumber()); err != nil {
@@ -50,7 +56,10 @@ func requiredCI(ctx context.Context, c *github.Client, owner, repo string, pr *g
 	var rules []struct {
 		Type       string `json:"type"`
 		Parameters struct {
-			AllowedMergeMethods []string `json:"allowed_merge_methods"`
+			AllowedMergeMethods  []string `json:"allowed_merge_methods"`
+			RequiredStatusChecks []struct {
+				Context string `json:"context"`
+			} `json:"required_status_checks"`
 		} `json:"parameters"`
 	}
 	response, err := c.Do(ctx, request, &rules)
@@ -61,8 +70,13 @@ func requiredCI(ctx context.Context, c *github.Client, owner, repo string, pr *g
 		return fmt.Errorf("effective rules exceed one page")
 	}
 	pullRequestRequired := false
+	var required []string
 	for _, rule := range rules {
 		switch rule.Type {
+		case "required_status_checks":
+			for _, check := range rule.Parameters.RequiredStatusChecks {
+				required = append(required, check.Context)
+			}
 		case "pull_request":
 			pullRequestRequired = true
 			if len(rule.Parameters.AllowedMergeMethods) > 0 && !slices.Contains(rule.Parameters.AllowedMergeMethods, "merge") {
@@ -90,6 +104,17 @@ func requiredCI(ctx context.Context, c *github.Client, owner, repo string, pr *g
 			return err
 		}
 	}
+	// GitHub refuses the merge while a required check is absent and only
+	// reports the pull request as blocked. Naming the check says what to do.
+	for _, name := range required {
+		if _, ran := checks[name]; ran {
+			continue
+		}
+		if _, reported := statuses[name]; reported {
+			continue
+		}
+		return &missingCheck{name: name, head: pr.GetHead().GetSHA(), base: branch}
+	}
 	// Every check that ran must be green; none is named in advance. A skipped
 	// or neutral check ran nothing that could fail.
 	for name, apps := range checks {
@@ -111,6 +136,43 @@ func requiredCI(ctx context.Context, c *github.Client, owner, repo string, pr *g
 		}
 	}
 	return nil
+}
+
+// missingCheck is a check the target branch requires that has not run on the
+// pull request's commit.
+type missingCheck struct {
+	name, head, base string
+}
+
+func (m *missingCheck) Error() string {
+	return fmt.Sprintf("required check %s has not run on %s", m.name, m.head)
+}
+
+const blockedMarker = "<!-- kelos-merge-blocked/v1 "
+
+// reportBlocked comments once per head that an approved pull request cannot
+// merge because a required check has not run on it.
+func reportBlocked(ctx context.Context, c *github.Client, owner, repo string, pr *github.PullRequest, controller string, missing *missingCheck) error {
+	marker := blockedMarker + missing.head + " -->"
+	opts := &github.IssueListCommentsOptions{ListOptions: github.ListOptions{PerPage: 100}}
+	for {
+		comments, response, err := c.Issues.ListComments(ctx, owner, repo, pr.GetNumber(), opts)
+		if err != nil {
+			return err
+		}
+		for _, comment := range comments {
+			if comment.GetUser().GetLogin() == controller && strings.HasPrefix(comment.GetBody(), marker) {
+				return nil
+			}
+		}
+		if response.NextPage == 0 {
+			break
+		}
+		opts.Page = response.NextPage
+	}
+	body := marker + "\nThis pull request is approved but cannot merge: the required check `" + missing.name + "` has not run on commit " + missing.head + ". The branch probably predates the workflow that reports it. Rebase it onto `" + missing.base + "`; commenting `/kelos run` on its issue lets the agent do that."
+	_, _, err := c.Issues.CreateComment(ctx, owner, repo, pr.GetNumber(), &github.IssueComment{Body: &body})
+	return err
 }
 
 func resolvedThreads(ctx context.Context, c *github.Client, owner, repo string, number int) error {
