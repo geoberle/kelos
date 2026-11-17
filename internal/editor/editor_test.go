@@ -256,7 +256,7 @@ func TestEditorResultAccounting(t *testing.T) {
 				want = 2
 			}
 			if tc.missing || tc.badHead || tc.unpublished {
-				if !strings.Contains(replies[0]["body"], "lgtm <full SHA>") {
+				if !strings.Contains(replies[0]["body"], "/lgtm") {
 					t.Fatal("missing recovery instructions")
 				}
 			}

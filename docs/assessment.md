@@ -26,8 +26,8 @@ not approval.
 A single controller-owned `kelos-assessment/v1` PR comment retains attempt
 identity, Task UID, head, request, state and concise explanation. Terminal
 failed, malformed and needs-human attempts never automatically retry on the
-same commit. An unedited authorized `reassess <full SHA>` comment targeting the
-current head permits a fresh attempt; the initially authorized user is
+same commit. An unedited authorized `/reassess` comment that is newer than the
+latest assessment of the current head permits a fresh attempt; the initially authorized user is
 `geoberle`, with current admin/maintain permission. Repeated polls of that command
 reuse its attempt. New heads may receive an initial assessment when their gates
 pass. Keep both history and Tasks; deleting evidence is not a retry mechanism.

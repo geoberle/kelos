@@ -2,8 +2,8 @@
 
 The editor polls ordinary conversation comments, inline comments and submitted
 review bodies from `geoberle`, checking the current admin/maintain role before
-admitting new requests. Empty text, bot reports and exact `lgtm <full SHA>` or
-`reassess <full SHA>` control commands are not repair requests. OCR findings
+admitting new requests. Empty text, bot reports and exact `/lgtm` or
+`/reassess` control commands are not repair requests. OCR findings
 remain on their separate verified-artifact path.
 
 Each observed request receives an identity containing its source kind, GitHub ID
@@ -32,7 +32,7 @@ Run a single controller instance.
 A failed, malformed or needs-human editor remains stopped and keeps its feedback
 pending. To recover without restarting automation, preserve its workspace and
 commits, finish the corrections manually on the existing PR, run CI and OCR,
-resolve review threads, and post a fresh authorized `lgtm <full SHA>` when ready.
+resolve review threads, and post a fresh authorized `/lgtm` when ready.
 Human approval bypasses `review-done` but not CI, hold or unresolved-thread gates.
 Deleting Tasks or evidence is not a supported retry mechanism. Automated editor
 restart is intentionally absent; `reassess` retries only merge assessments.

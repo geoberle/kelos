@@ -1,6 +1,6 @@
 # Human approval binding: issue #8 feasibility
 
-Status: decision adopted after investigation, 2026-11-15. Humans approve with `lgtm <full SHA>` comments. Go performs a final gate recheck and SHA-conditional merge; the remaining hold/feedback race is accepted. The evidence below explains why label-only approval was rejected.
+Status: superseded in part by ADR 0013 on 2026-11-17: humans now approve with `/lgtm`, which the controller binds to a commit. Originally adopted 2026-11-15: humans approve with `lgtm <full SHA>` comments. Go performs a final gate recheck and SHA-conditional merge; the remaining hold/feedback race is accepted. The evidence below explains why label-only approval was rejected.
 
 A human-applied `lgtm` label cannot currently be proven to identify the intended PR head using the documented polling APIs. Do not bind it to the first observed head. This is a finding, not a change to the agreed interaction or ADRs. Issue #8's remaining implementation and live merge acceptance criteria remain unmet.
 

@@ -30,6 +30,9 @@ func TestGuardedMerge(t *testing.T) {
 		{"approval deleted before final check", false},
 		{"new human feedback before final check", false}, {"retained deleted feedback invalidates approval", false},
 		{"force push after approval invalidates it", false},
+		{"push after approval is not approved", false},
+		{"commit that returns to the branch after approval is not approved", false},
+		{"branch without a push log entry for the head is not approved", false},
 		{"human role revoked", false},
 		{"ambiguous successful merge is recovered", true},
 		{"stale approval stays revoked when head returns", false},
@@ -81,7 +84,7 @@ func TestGuardedMerge(t *testing.T) {
 				if strings.Contains(tc.name, "test merge checks") {
 					mergeSHA = strings.Repeat("c", 40)
 				}
-				return fmt.Sprintf(`{"merge_commit_sha":%q,"number":1,"state":"open","draft":%t,"merged":%t,"mergeable":true,"mergeable_state":"clean","head":{"sha":%q},"base":{"ref":"main","sha":"base"},"labels":[%s]}`, mergeSHA, tc.name == "draft prevents merge", merged, head, labels)
+				return fmt.Sprintf(`{"merge_commit_sha":%q,"number":1,"state":"open","draft":%t,"merged":%t,"mergeable":true,"mergeable_state":"clean","head":{"sha":%q,"ref":"agent-fix","repo":{"full_name":"owner/repo"}},"base":{"ref":"main","sha":"base"},"labels":[%s]}`, mergeSHA, tc.name == "draft prevents merge", merged, head, labels)
 			}
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
@@ -158,7 +161,7 @@ func TestGuardedMerge(t *testing.T) {
 					comments := append([]*github.IssueComment{}, ledger...)
 					if tc.name != "automated approval without current review" && tc.name != "bare label is not approval" && (tc.name != "approval deleted before final check" || commentReads <= 1) {
 						var human github.IssueComment
-						_ = json.Unmarshal([]byte(`{"id":10,"body":"lgtm `+sha+`","user":{"id":1,"login":"geoberle"},"created_at":"2026-11-15T10:00:00Z","updated_at":"2026-11-15T10:00:00Z"}`), &human)
+						_ = json.Unmarshal([]byte(`{"id":10,"body":"/lgtm","user":{"id":1,"login":"geoberle"},"created_at":"2026-11-15T10:00:00Z","updated_at":"2026-11-15T10:00:00Z"}`), &human)
 						if tc.name == "edited approval is not reused" {
 							human.UpdatedAt = github.Ptr(github.Timestamp{Time: human.GetCreatedAt().Add(time.Second)})
 						}
@@ -244,6 +247,21 @@ func TestGuardedMerge(t *testing.T) {
 					body = fmt.Sprintf(`{"check_runs":[{"id":30,"head_sha":%q,"name":"test","status":"completed","conclusion":%q,"app":{"id":7}}]}`, strings.Repeat("c", 40), conclusion)
 				case "/repos/owner/repo/commits/" + strings.Repeat("c", 40) + "/statuses":
 					body = `[]`
+				case "/repos/owner/repo/activity":
+					// GitHub's push log for the PR branch, newest first. The approval comment is from 10:00.
+					if r.URL.Query().Get("ref") != "refs/heads/agent-fix" {
+						t.Errorf("push log read for %q", r.URL.Query().Get("ref"))
+					}
+					body = `[{"activity_type":"push","ref":"refs/heads/agent-fix","after":"` + sha + `","timestamp":"2026-11-15T09:00:00Z"}]`
+					switch tc.name {
+					case "push after approval is not approved":
+						body = `[{"activity_type":"push","ref":"refs/heads/agent-fix","after":"` + sha + `","timestamp":"2026-11-15T10:00:30Z"}]`
+					case "commit that returns to the branch after approval is not approved":
+						// The same commit was the head at 08:00, was replaced, and was pushed again after the comment.
+						body = `[{"activity_type":"push","ref":"refs/heads/agent-fix","after":"` + sha + `","timestamp":"2026-11-15T10:00:30Z"},{"activity_type":"force_push","ref":"refs/heads/agent-fix","after":"` + strings.Repeat("d", 40) + `","timestamp":"2026-11-15T08:30:00Z"},{"activity_type":"push","ref":"refs/heads/agent-fix","after":"` + sha + `","timestamp":"2026-11-15T08:00:00Z"}]`
+					case "branch without a push log entry for the head is not approved":
+						body = `[{"activity_type":"push","ref":"refs/heads/agent-fix","after":"` + strings.Repeat("d", 40) + `","timestamp":"2026-11-15T09:00:00Z"}]`
+					}
 				case "/repos/owner/repo/commits/" + sha + "/statuses":
 					body = `[]`
 					if tc.name == "failed commit status blocks merge" {

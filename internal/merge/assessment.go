@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -140,15 +139,10 @@ func writeAssessments(ctx context.Context, c *github.Client, owner, repo string,
 	return nil
 }
 
-func reassessSHA(body string) string {
-	fields := strings.Fields(body)
-	if len(fields) != 2 || fields[0] != "reassess" || len(fields[1]) != 40 {
-		return ""
-	}
-	if _, err := hex.DecodeString(fields[1]); err != nil {
-		return ""
-	}
-	return strings.ToLower(fields[1])
+// isReassess reports whether a comment is the command that requests another
+// assessment. It names no commit; see assess for how it is bound to one.
+func isReassess(body string) bool {
+	return strings.TrimSpace(body) == "/reassess"
 }
 
 func assess(ctx context.Context, c *github.Client, cache *review.Cache, k dynamic.Interface, owner, repo string, listed *github.PullRequest, config AssessmentConfig, controller string) error {
@@ -199,9 +193,17 @@ func assess(ctx context.Context, c *github.Client, cache *review.Cache, k dynami
 	if !complete {
 		return assessmentLabel(ctx, c, cache, owner, repo, pr.GetNumber(), controller)
 	}
+	// A request answers the latest assessment, and only while that assessment
+	// is of the current head; it must be newer than that attempt. A request
+	// made for another head never counts, also when the branch returns to
+	// this one. A new head is assessed without a request.
+	var assessed time.Time
+	if n := len(history.Attempts); n > 0 && history.Attempts[n-1].Head == pr.GetHead().GetSHA() {
+		assessed = history.Attempts[n-1].Started
+	}
 	request := int64(0)
 	for _, comment := range comments {
-		if comment.GetUser().GetLogin() == "geoberle" && reassessSHA(comment.GetBody()) == pr.GetHead().GetSHA() && !comment.GetCreatedAt().IsZero() && comment.GetCreatedAt().Equal(comment.GetUpdatedAt()) && comment.GetID() > request {
+		if comment.GetUser().GetLogin() == "geoberle" && isReassess(comment.GetBody()) && !assessed.IsZero() && comment.GetCreatedAt().After(assessed) && comment.GetCreatedAt().Equal(comment.GetUpdatedAt()) && comment.GetID() > request {
 			request = comment.GetID()
 		}
 	}
@@ -264,7 +266,7 @@ func assess(ctx context.Context, c *github.Client, cache *review.Cache, k dynami
 	phase, _, _ := unstructured.NestedString(task.Object, "status", "phase")
 	if phase == "Failed" {
 		a.State = "failed"
-		a.Reason = "Assessment execution failed; use reassess <full SHA> to retry."
+		a.Reason = "Assessment execution failed; comment /reassess to retry."
 	}
 	if phase == "Succeeded" {
 		encoded, _, _ := unstructured.NestedString(task.Object, "status", "results", "response")
@@ -272,7 +274,7 @@ func assess(ctx context.Context, c *github.Client, cache *review.Cache, k dynami
 		recommendation, reason, parseErr := decodeAssessment(raw, a.Head)
 		if decodeErr != nil || parseErr != nil {
 			a.State = "malformed"
-			a.Reason = "Invalid assessment output; use reassess <full SHA> to retry."
+			a.Reason = "Invalid assessment output; comment /reassess to retry."
 		} else {
 			a.State = recommendation
 			a.Reason = reason
@@ -375,7 +377,7 @@ func automaticApproval(ctx context.Context, c *github.Client, cache *review.Cach
 	if a.Request > 0 {
 		found := false
 		for _, comment := range comments {
-			if comment.GetID() == a.Request && comment.GetUser().GetLogin() == "geoberle" && reassessSHA(comment.GetBody()) == a.Head && !comment.GetCreatedAt().IsZero() && comment.GetCreatedAt().Equal(comment.GetUpdatedAt()) {
+			if comment.GetID() == a.Request && comment.GetUser().GetLogin() == "geoberle" && isReassess(comment.GetBody()) && !comment.GetCreatedAt().IsZero() && comment.GetCreatedAt().Equal(comment.GetUpdatedAt()) {
 				found = true
 			}
 		}

@@ -28,6 +28,7 @@ func TestCleanReviewCreatesAssessment(t *testing.T) {
 		name                          string
 		response, state               string
 		retry, denied, edited, failed bool
+		stale                         bool
 		changedHead                   bool
 		badOCR                        string
 	}{
@@ -46,6 +47,7 @@ func TestCleanReviewCreatesAssessment(t *testing.T) {
 		{name: "duplicate result key", response: `{"commit":"old","commit":"head","recommendation":"approve","reason":"Tested."}`, state: "malformed"},
 		{name: "explicit retry after malformed result", response: `invalid`, state: "pending", retry: true},
 		{name: "unauthorized retry", response: `invalid`, state: "malformed", retry: true, denied: true},
+		{name: "retry request older than the assessment", response: `invalid`, state: "malformed", retry: true, stale: true},
 		{name: "edited retry", response: `invalid`, state: "malformed", retry: true, edited: true},
 		{name: "failed task is not automatically retried", state: "failed", failed: true},
 		{name: "trailing result", response: `{"commit":"head","recommendation":"approve","reason":"Tested."} {}`, state: "malformed"},
@@ -233,7 +235,12 @@ func TestCleanReviewCreatesAssessment(t *testing.T) {
 					comments := append([]*github.IssueComment{}, savedComments...)
 					if requestVisible {
 						var command github.IssueComment
-						_ = json.Unmarshal([]byte(`{"id":200,"body":"reassess `+sha+`","user":{"login":"geoberle"},"created_at":"2026-11-15T00:00:00Z","updated_at":"2026-11-15T00:00:00Z"}`), &command)
+						// A request counts only when it is newer than the assessment it answers.
+						created := "2099-01-01T00:00:00Z"
+						if tc.stale {
+							created = "2026-11-15T00:00:00Z"
+						}
+						_ = json.Unmarshal([]byte(`{"id":200,"body":"/reassess","user":{"login":"geoberle"},"created_at":"`+created+`","updated_at":"`+created+`"}`), &command)
 						if tc.edited {
 							command.UpdatedAt = github.Ptr(github.Timestamp{Time: command.GetCreatedAt().Add(time.Second)})
 						}
@@ -297,7 +304,7 @@ func TestCleanReviewCreatesAssessment(t *testing.T) {
 				t.Fatalf("lgtm=%v for %s", approved, tc.state)
 			}
 			wantCreates := 1
-			if tc.retry && !tc.denied && !tc.edited {
+			if tc.retry && !tc.denied && !tc.edited && !tc.stale {
 				wantCreates = 2
 			}
 			if len(savedComments) != 1 || !strings.Contains(savedComments[0].GetBody(), `"state":"`+tc.state+`"`) {

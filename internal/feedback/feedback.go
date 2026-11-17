@@ -4,7 +4,6 @@ package feedback
 import (
 	"context"
 	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"strings"
 
@@ -25,11 +24,9 @@ func List(ctx context.Context, c *github.Client, owner, repo string, number int)
 		if len(strings.TrimSpace(body)) == 0 {
 			return
 		}
-		fields := strings.Fields(body)
-		if len(fields) == 2 && (fields[0] == "lgtm" || fields[0] == "reassess") && len(fields[1]) == 40 {
-			if _, err := hex.DecodeString(fields[1]); err == nil {
-				return
-			}
+		// Control commands are not repair requests.
+		if command := strings.TrimSpace(body); command == "/lgtm" || command == "/reassess" {
+			return
 		}
 		hash := sha256.Sum256([]byte(version + "\n" + body))
 		findings = append(findings, Finding{ID: fmt.Sprintf("human/%s/%d/%x", kind, id, hash), Content: body, Source: source, Path: path, ReviewCommentID: reply})
