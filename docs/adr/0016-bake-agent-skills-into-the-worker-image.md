@@ -19,5 +19,7 @@ manifest large.
 
 The cost is that a skill change needs a new image and a new pin.
 
-`implement` tells the agent to finish with the `code-review` skill, which is
-not installed.
+Codex does not offer `implement` to the agent, because the skill marks itself
+as not for unprompted use. It stays in the image for a prompt that names it.
+It tells the agent to finish with the `code-review` skill, which is not
+installed.
