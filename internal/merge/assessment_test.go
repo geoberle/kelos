@@ -45,6 +45,7 @@ func TestCleanReviewCreatesAssessment(t *testing.T) {
 		{name: "valid assessment", response: `{"commit":"head","recommendation":"approve","reason":"Small tested change."}`, state: "approve"},
 		{name: "approval survives absent review-done label", response: `{"commit":"head","recommendation":"approve","reason":"Small tested change."}`, state: "approve"},
 		{name: "needs human remains terminal", response: `{"commit":"head","recommendation":"needs-human","reason":"Migration risk."}`, state: "needs-human"},
+		{name: "defect found is recorded for the editor", response: `{"commit":"head","recommendation":"needs-fix","reason":"Removing a Slot deletes an Item on the wrong Page."}`, state: "needs-fix"},
 		{name: "malformed result remains terminal", response: `not json`, state: "malformed"},
 		{name: "stale result", response: `{"commit":"old","recommendation":"approve","reason":"Tested."}`, state: "malformed"},
 		{name: "duplicate result key", response: `{"commit":"old","commit":"head","recommendation":"approve","reason":"Tested."}`, state: "malformed"},
@@ -338,6 +339,9 @@ func TestCleanReviewCreatesAssessment(t *testing.T) {
 			}
 			if !strings.Contains(spec["prompt"].(string), sha) {
 				t.Fatal("assessment lost head")
+			}
+			if !strings.Contains(spec["prompt"].(string), "recommendation (approve, needs-fix or needs-human)") {
+				t.Fatalf("prompt does not offer needs-fix:\n%s", spec["prompt"])
 			}
 			unreviewed := "The code review could not read these binary files: vendor/font.ttf."
 			if strings.Contains(spec["prompt"].(string), unreviewed) != tc.binary {
