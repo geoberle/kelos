@@ -54,7 +54,10 @@ func TestVerifiedReviewEvidence(t *testing.T) {
 		{"missing coverage cannot complete", 0, false, `"completed":[{"item_id":"file-1","path":"main.go"}]`, `"completed":[]`, false, 2, "controller"},
 		{"stale review cannot complete", 0, false, `"resolved_head":"head"`, `"resolved_head":"old"`, false, 2, "controller"},
 		{"deleted file excluded from review permits completion", 0, true, `"excluded":[]`, `"excluded":[{"item_id":"file-2","path":"old.go","exclude_reason":"deleted"}]`, false, 2, "controller"},
-		{"file excluded for another reason cannot complete", 0, false, `"excluded":[]`, `"excluded":[{"item_id":"file-2","path":"old.go","exclude_reason":"binary"}]`, false, 2, "controller"},
+		{"file excluded for another reason cannot complete", 0, false, `"excluded":[]`, `"excluded":[{"item_id":"file-2","path":"old.go","exclude_reason":"generated"}]`, false, 2, "controller"},
+		{"binary file excluded from review permits completion", 0, true, `"excluded":[]`, `"excluded":[{"item_id":"file-2","path":"font.ttf","exclude_reason":"binary"}]`, false, 2, "controller"},
+		{"binary exclusion of a file GitHub shows as text cannot complete", 0, false, `"excluded":[]`, `"excluded":[{"item_id":"file-2","path":"font.ttf","exclude_reason":"binary"}]`, false, 2, "controller"},
+		{"binary exclusion absent from changed files cannot complete", 0, false, `"excluded":[]`, `"excluded":[{"item_id":"file-2","path":"font.ttf","exclude_reason":"binary"}]`, false, 2, "controller"},
 		{"excluded file that GitHub reports as modified cannot complete", 0, false, `"excluded":[]`, `"excluded":[{"item_id":"file-2","path":"old.go","exclude_reason":"deleted"}]`, false, 2, "controller"},
 		{"deleted exclusion absent from changed files cannot complete", 0, false, `"excluded":[]`, `"excluded":[{"item_id":"file-2","path":"old.go","exclude_reason":"deleted"}]`, false, 2, "controller"},
 		{"removed file without exclusion cannot complete", 0, false, "", "", false, 2, "controller"},
@@ -186,6 +189,11 @@ func TestVerifiedReviewEvidence(t *testing.T) {
 						body = `[{"filename":"main.go"},{"filename":"old.go","status":"removed"}]`
 					case "excluded file that GitHub reports as modified cannot complete":
 						body = `[{"filename":"main.go"},{"filename":"old.go","status":"modified"}]`
+					case "binary file excluded from review permits completion":
+						// GitHub gives no patch for a binary file.
+						body = `[{"filename":"main.go"},{"filename":"font.ttf","status":"added"}]`
+					case "binary exclusion of a file GitHub shows as text cannot complete":
+						body = `[{"filename":"main.go"},{"filename":"font.ttf","status":"added","patch":"@@ -0,0 +1 @@\n+text"}]`
 					}
 				case "/users/controller", "/users/controller[bot]":
 					body = fmt.Sprintf(`{"id":90,"login":%q}`, tc.actor)

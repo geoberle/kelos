@@ -31,8 +31,11 @@ func TestCleanReviewCreatesAssessment(t *testing.T) {
 		stale                         bool
 		changedHead                   bool
 		badOCR                        string
+		// binary makes the review exclude one binary file
+		binary bool
 	}{
 		{name: "clean current review creates retained assessment", state: "pending"},
+		{name: "binary file the review excluded is named in the assessment", state: "pending", binary: true},
 		{name: "new head during publication invalidates approval", response: `{"commit":"head","recommendation":"approve","reason":"Tested."}`, state: "invalidated", changedHead: true},
 		{name: "later failed OCR invalidates approval", response: `{"commit":"head","recommendation":"approve","reason":"Tested."}`, state: "invalidated", badOCR: "failed"},
 		{name: "later skipped OCR invalidates approval", response: `{"commit":"head","recommendation":"approve","reason":"Tested."}`, state: "invalidated", badOCR: "skipped"},
@@ -60,6 +63,9 @@ func TestCleanReviewCreatesAssessment(t *testing.T) {
 			result, err := os.ReadFile("../review/testdata/complete.json")
 			if err != nil {
 				t.Fatal(err)
+			}
+			if tc.binary {
+				result = []byte(strings.Replace(string(result), `"excluded":[]`, `"excluded":[{"item_id":"file-2","path":"vendor/font.ttf","exclude_reason":"binary"}]`, 1))
 			}
 			total := 0
 			archives := map[string][]byte{}
@@ -220,6 +226,9 @@ func TestCleanReviewCreatesAssessment(t *testing.T) {
 					body = `{"merge_base_commit":{"sha":"base"}}`
 				case "/repos/owner/repo/pulls/1/files":
 					body = `[{"filename":"main.go"}]`
+					if tc.binary {
+						body = `[{"filename":"main.go"},{"filename":"vendor/font.ttf","status":"added"}]`
+					}
 				case "/repos/owner/repo/issues/1/comments":
 					if r.Method == "POST" {
 						var comment github.IssueComment
@@ -329,6 +338,10 @@ func TestCleanReviewCreatesAssessment(t *testing.T) {
 			}
 			if !strings.Contains(spec["prompt"].(string), sha) {
 				t.Fatal("assessment lost head")
+			}
+			unreviewed := "The code review could not read these binary files: vendor/font.ttf."
+			if strings.Contains(spec["prompt"].(string), unreviewed) != tc.binary {
+				t.Fatalf("binary=%v but prompt is:\n%s", tc.binary, spec["prompt"])
 			}
 		})
 	}
