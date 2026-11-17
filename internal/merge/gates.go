@@ -11,14 +11,26 @@ import (
 )
 
 // gates reads the effective branch rules, which include organization rulesets.
-func gates(ctx context.Context, c *github.Client, owner, repo string, pr *github.PullRequest) error {
-	if pr.GetState() != "open" || pr.GetDraft() || pr.GetMerged() || !label(pr, "agent-managed") || label(pr, "hold") || !pr.GetMergeable() || pr.GetMergeableState() != "clean" {
+// The verify result comes last, so that verify only runs for a pull request
+// nothing else holds back.
+func gates(ctx context.Context, c *github.Client, owner, repo string, pr *github.PullRequest, controller string) error {
+	if pr.GetState() != "open" || pr.GetDraft() || pr.GetMerged() || !label(pr, "agent-managed") || label(pr, "hold") || !pr.GetMergeable() {
 		return fmt.Errorf("PR is not ready to merge")
 	}
 	if err := requiredCI(ctx, c, owner, repo, pr); err != nil {
 		return err
 	}
-	return resolvedThreads(ctx, c, owner, repo, pr.GetNumber())
+	if err := resolvedThreads(ctx, c, owner, repo, pr.GetNumber()); err != nil {
+		return err
+	}
+	if err := verified(ctx, c, owner, repo, pr, controller); err != nil {
+		return err
+	}
+	// A verify result that is pending or missing keeps the state from being clean.
+	if pr.GetMergeableState() != "clean" {
+		return fmt.Errorf("PR is not ready to merge")
+	}
+	return nil
 }
 
 // requiredCI checks what GitHub's rules do not express for this controller:
@@ -93,7 +105,8 @@ func requiredCI(ctx context.Context, c *github.Client, owner, repo string, pr *g
 		}
 	}
 	for name, status := range statuses {
-		if status.GetState() != "success" {
+		// The verify result is judged against the current base separately.
+		if name != verifyContext && status.GetState() != "success" {
 			return fmt.Errorf("status %s is not successful", name)
 		}
 	}

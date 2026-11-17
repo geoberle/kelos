@@ -24,6 +24,15 @@ controller empties it once a day. The poll after that pays for every read once.
 - The artifacts of a review run attempt never change and are downloaded once.
 - An editor Task whose result is recorded is not processed again.
 
+## Verify on the current base
+
+For each approved pull request that passed every other gate, a poll reads the
+base branch head and the statuses of the pull request head. Both are answered
+with 304 while nothing changed, so a poll without changes still sends no
+counted request. A pull request whose verify run is unfinished costs one
+counted read of that run per poll; only one run per base branch is under way.
+Starting a run costs two writes, recording its result one.
+
 ## Measuring
 
 Every poll logs `Poll finished` with `githubRequests` (requests sent),
