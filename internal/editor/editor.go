@@ -200,6 +200,46 @@ func reconcile(ctx context.Context, c *github.Client, cache *review.Cache, k dyn
 		name := "editor-" + key + "-" + fmt.Sprintf("%x", sha256.Sum256(encoded))[:16]
 		return create(ctx, c, k, config, owner, repo, pr, assignment, key, name)
 	}
+	check, job, err := failedCheck(ctx, c, owner, repo, pr)
+	if err != nil {
+		return err
+	}
+	if check != nil {
+		rounds := 0
+		for _, task := range existing.Items {
+			var assigned Assignment
+			if err := json.Unmarshal([]byte(task.GetAnnotations()["orchestrator.kelos.dev/assignment"]), &assigned); err != nil {
+				return err
+			}
+			for _, f := range assigned.Findings {
+				if f.ID == check.ID {
+					return nil
+				}
+				if strings.HasPrefix(f.ID, checkPrefix) {
+					rounds++
+				}
+			}
+		}
+		// A repair that keeps failing the check must not run forever.
+		if rounds >= maxCheckRounds {
+			// Reported once per PR, under a name no editor Task has.
+			limit := &unstructured.Unstructured{}
+			limit.SetName("check-round-limit")
+			return reportFailure(ctx, c, owner, repo, pr, limit, controllerLogin, fmt.Errorf("round limit of %d check repairs reached", maxCheckRounds))
+		}
+		excerpt, err := checkLog(ctx, c, owner, repo, job)
+		if err != nil {
+			return err
+		}
+		check.Content += excerpt
+		assignment := Assignment{Repository: owner + "/" + repo, PR: pr.GetNumber(), Head: pr.GetHead().GetSHA(), Findings: []Finding{*check}}
+		encoded, err := json.Marshal(assignment)
+		if err != nil {
+			return err
+		}
+		name := "editor-" + key + "-" + fmt.Sprintf("%x", sha256.Sum256(encoded))[:16]
+		return create(ctx, c, k, config, owner, repo, pr, assignment, key, name)
+	}
 	evidence, err := review.CurrentEvidence(ctx, c, cache, owner, repo, pr, controllerLogin)
 	if err != nil || evidence == nil {
 		return err

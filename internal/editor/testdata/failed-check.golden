@@ -1,0 +1,65 @@
+check/owner/repo/1/55
+https://github.com/owner/repo/actions/runs/9/job/55
+The CI check `verify` failed on commit head. It runs `make verify` and then `make e2e` on the pull request merged onto its base branch. Find the cause in the end of the failing job's log below and fix it. `make e2e` needs a container runtime that this pod lacks, so judge its checks from the log.
+
+Log excerpt:
+[37/1585] Building C object esp-idf/file37.c.obj
+[38/1585] Building C object esp-idf/file38.c.obj
+[39/1585] Building C object esp-idf/file39.c.obj
+[40/1585] Building C object esp-idf/file40.c.obj
+[41/1585] Building C object esp-idf/file41.c.obj
+[42/1585] Building C object esp-idf/file42.c.obj
+[43/1585] Building C object esp-idf/file43.c.obj
+[44/1585] Building C object esp-idf/file44.c.obj
+[45/1585] Building C object esp-idf/file45.c.obj
+[46/1585] Building C object esp-idf/file46.c.obj
+[47/1585] Building C object esp-idf/file47.c.obj
+[48/1585] Building C object esp-idf/file48.c.obj
+[49/1585] Building C object esp-idf/file49.c.obj
+[50/1585] Building C object esp-idf/file50.c.obj
+[51/1585] Building C object esp-idf/file51.c.obj
+[52/1585] Building C object esp-idf/file52.c.obj
+[53/1585] Building C object esp-idf/file53.c.obj
+[54/1585] Building C object esp-idf/file54.c.obj
+[55/1585] Building C object esp-idf/file55.c.obj
+[56/1585] Building C object esp-idf/file56.c.obj
+[57/1585] Building C object esp-idf/file57.c.obj
+[58/1585] Building C object esp-idf/file58.c.obj
+[59/1585] Building C object esp-idf/file59.c.obj
+[60/1585] Building C object esp-idf/file60.c.obj
+[61/1585] Building C object esp-idf/file61.c.obj
+[62/1585] Building C object esp-idf/file62.c.obj
+[63/1585] Building C object esp-idf/file63.c.obj
+[64/1585] Building C object esp-idf/file64.c.obj
+[65/1585] Building C object esp-idf/file65.c.obj
+[66/1585] Building C object esp-idf/file66.c.obj
+[67/1585] Building C object esp-idf/file67.c.obj
+[68/1585] Building C object esp-idf/file68.c.obj
+[69/1585] Building C object esp-idf/file69.c.obj
+[70/1585] Building C object esp-idf/file70.c.obj
+[71/1585] Building C object esp-idf/file71.c.obj
+[72/1585] Building C object esp-idf/file72.c.obj
+[73/1585] Building C object esp-idf/file73.c.obj
+[74/1585] Building C object esp-idf/file74.c.obj
+[75/1585] Building C object esp-idf/file75.c.obj
+[76/1585] Building C object esp-idf/file76.c.obj
+[77/1585] Building C object esp-idf/file77.c.obj
+[78/1585] Building C object esp-idf/file78.c.obj
+[79/1585] Building C object esp-idf/file79.c.obj
+[80/1585] Building C object esp-idf/file80.c.obj
+[81/1585] Building C object esp-idf/file81.c.obj
+[82/1585] Building C object esp-idf/file82.c.obj
+[83/1585] Building C object esp-idf/file83.c.obj
+[84/1585] Building C object esp-idf/file84.c.obj
+[85/1585] Building C object esp-idf/file85.c.obj
+[86/1585] Building C object esp-idf/file86.c.obj
+[87/1585] Building C object esp-idf/file87.c.obj
+[88/1585] Building C object esp-idf/file88.c.obj
+[89/1585] Building C object esp-idf/file89.c.obj
+[90/1585] Building C object esp-idf/file90.c.obj
+make e2e
+Integrations: 1
+Invalid integrations: 1
+* [ERROR] [DEPENDENCIES] Using component http but it's not in 'dependencies' or 'after_dependencies'
+make: *** [Makefile:52: check-hassfest] Error 1
+##[error]Process completed with exit code 2.
