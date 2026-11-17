@@ -159,7 +159,8 @@ func TestPollReportsStoppedTasks(t *testing.T) {
 				w.Header().Set("Content-Type", "application/json")
 				switch {
 				case r.Method == "GET" && r.URL.Path == "/apis/kelos.dev/v1alpha2/namespaces/agents/tasks":
-					annotations := map[string]any{"kelos.dev/source-kind": "issue", "kelos.dev/source-number": "3"}
+					// The in-progress label has its own test; here the issue is already labelled.
+					annotations := map[string]any{"kelos.dev/source-kind": "issue", "kelos.dev/source-number": "3", "orchestrator.kelos.dev/in-progress-labelled": "true"}
 					if reported {
 						annotations["orchestrator.kelos.dev/stop-reported"] = "true"
 					}
@@ -194,6 +195,8 @@ func TestPollReportsStoppedTasks(t *testing.T) {
 					patches++
 					reported = true
 					_, _ = w.Write([]byte(`{"apiVersion":"kelos.dev/v1alpha2","kind":"Task","metadata":{"name":"owner-repo-implementation-3","namespace":"agents"}}`))
+				case r.Method == "GET" && r.URL.Path == "/repos/owner/repo/issues":
+					_, _ = w.Write([]byte(`[]`))
 				case r.Method == "GET" && r.URL.Path == "/repos/owner/repo/issues/3/comments":
 					_, _ = w.Write([]byte(tc.comments))
 				case r.Method == "POST" && r.URL.Path == "/repos/owner/repo/issues/3/comments":
@@ -336,7 +339,8 @@ func TestPollLinksTheLogOfRunningTasks(t *testing.T) {
 				w.Header().Set("Content-Type", "application/json")
 				switch {
 				case r.Method == "GET" && r.URL.Path == "/apis/kelos.dev/v1alpha2/namespaces/agents/tasks":
-					annotations := map[string]any{"kelos.dev/source-kind": "issue", "kelos.dev/source-number": "3"}
+					// The in-progress label has its own test; here the issue is already labelled.
+					annotations := map[string]any{"kelos.dev/source-kind": "issue", "kelos.dev/source-number": "3", "orchestrator.kelos.dev/in-progress-labelled": "true"}
 					if linked {
 						annotations["orchestrator.kelos.dev/log-linked"] = "true"
 					}
@@ -361,6 +365,8 @@ func TestPollLinksTheLogOfRunningTasks(t *testing.T) {
 					patches++
 					linked = true
 					_, _ = w.Write([]byte(`{"apiVersion":"kelos.dev/v1alpha2","kind":"Task","metadata":{"name":"owner-repo-implementation-3","namespace":"agents"}}`))
+				case r.Method == "GET" && r.URL.Path == "/repos/owner/repo/issues":
+					_, _ = w.Write([]byte(`[]`))
 				case r.Method == "GET" && r.URL.Path == "/repos/owner/repo/issues/3/comments":
 					_, _ = w.Write([]byte(tc.comments))
 				case r.Method == "POST" && r.URL.Path == "/repos/owner/repo/issues/3/comments":
@@ -412,6 +418,202 @@ func TestPollLinksTheLogOfRunningTasks(t *testing.T) {
 			}
 			if posted[0] != string(want) {
 				t.Fatalf("comment:\n%s\nwant:\n%s", posted[0], want)
+			}
+		})
+	}
+}
+
+func TestPollLabelsIssuesInProgress(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		// task fields; no Task exists when hasTask is false
+		hasTask  bool
+		phase    string
+		response string
+		reported bool
+		labelled bool
+		// fresh sets the completion time to now; otherwise it is long past
+		fresh bool
+		// issue is the issue as GitHub returns it
+		issue string
+		// labelledIssues is GitHub's list of issues carrying the label
+		labelledIssues string
+		wantAdd        bool
+		wantRemove     bool
+		wantPatch      bool
+	}{
+		{
+			name:           "running task labels its open issue",
+			hasTask:        true,
+			phase:          "Running",
+			issue:          `{"number":3,"state":"open"}`,
+			labelledIssues: `[]`,
+			wantAdd:        true,
+			wantPatch:      true,
+		},
+		{
+			name:           "task that opened a pull request labels its open issue",
+			hasTask:        true,
+			phase:          "Succeeded",
+			response:       `{"state":"completed","pullRequest":"https://github.com/owner/repo/pull/9"}`,
+			issue:          `{"number":3,"state":"open"}`,
+			labelledIssues: `[]`,
+			wantAdd:        true,
+			wantPatch:      true,
+		},
+		{
+			name:           "task of a closed issue is only recorded",
+			hasTask:        true,
+			phase:          "Succeeded",
+			response:       `{"state":"completed","pullRequest":"https://github.com/owner/repo/pull/9"}`,
+			issue:          `{"number":3,"state":"closed"}`,
+			labelledIssues: `[]`,
+			wantPatch:      true,
+		},
+		{
+			name:           "label stays while the task runs",
+			hasTask:        true,
+			phase:          "Running",
+			labelled:       true,
+			labelledIssues: `[{"number":3,"state":"open"}]`,
+		},
+		{
+			name:           "label stays while the pull request is open",
+			hasTask:        true,
+			phase:          "Succeeded",
+			response:       `{"state":"completed","pullRequest":"https://github.com/owner/repo/pull/9"}`,
+			labelled:       true,
+			labelledIssues: `[{"number":3,"state":"open"}]`,
+		},
+		{
+			name:           "label stays while Kelos captures the final message",
+			hasTask:        true,
+			phase:          "Succeeded",
+			fresh:          true,
+			labelled:       true,
+			labelledIssues: `[{"number":3,"state":"open"}]`,
+		},
+		{
+			name:           "label is removed once the issue is closed",
+			hasTask:        true,
+			phase:          "Succeeded",
+			response:       `{"state":"completed","pullRequest":"https://github.com/owner/repo/pull/9"}`,
+			labelled:       true,
+			labelledIssues: `[{"number":3,"state":"closed"}]`,
+			wantRemove:     true,
+		},
+		{
+			name:           "label is removed when the task stopped without a pull request",
+			hasTask:        true,
+			phase:          "Failed",
+			reported:       true,
+			labelled:       true,
+			labelledIssues: `[{"number":3,"state":"open"}]`,
+			wantRemove:     true,
+		},
+		{
+			name:           "stopped task does not label its issue",
+			hasTask:        true,
+			phase:          "Failed",
+			reported:       true,
+			labelledIssues: `[]`,
+		},
+		{
+			name:           "label is removed when the task is gone",
+			labelledIssues: `[{"number":3,"state":"open"}]`,
+			wantRemove:     true,
+		},
+		{
+			name:           "labelled pull request is left alone",
+			labelledIssues: `[{"number":3,"state":"open","pull_request":{"url":"https://api.github.com/repos/owner/repo/pulls/3"}}]`,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			labelled := tc.labelled
+			labelledIssues := tc.labelledIssues
+			adds, removes, patches := 0, 0, 0
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				switch {
+				case r.Method == "GET" && r.URL.Path == "/apis/kelos.dev/v1alpha2/namespaces/agents/tasks":
+					items := []any{}
+					if tc.hasTask {
+						annotations := map[string]any{"kelos.dev/source-kind": "issue", "kelos.dev/source-number": "3"}
+						if tc.reported {
+							annotations["orchestrator.kelos.dev/stop-reported"] = "true"
+						}
+						if labelled {
+							annotations["orchestrator.kelos.dev/in-progress-labelled"] = "true"
+						}
+						completion := "2026-01-01T00:00:00Z"
+						if tc.fresh {
+							completion = time.Now().UTC().Format(time.RFC3339)
+						}
+						status := map[string]any{"phase": tc.phase, "completionTime": completion}
+						if len(tc.response) > 0 {
+							status["results"] = map[string]any{"response": base64.StdEncoding.EncodeToString([]byte(tc.response))}
+						}
+						items = append(items, map[string]any{
+							"apiVersion": "kelos.dev/v1alpha2", "kind": "Task",
+							"metadata": map[string]any{"name": "owner-repo-implementation-3", "namespace": "agents", "uid": "uid-1", "labels": map[string]any{"kelos.dev/taskspawner": "owner-repo-implementation"}, "annotations": annotations},
+							"spec":     map[string]any{"branch": "agent/issue-3", "upstreamRepo": "owner/repo"},
+							"status":   status,
+						})
+					}
+					_ = json.NewEncoder(w).Encode(map[string]any{"apiVersion": "kelos.dev/v1alpha2", "kind": "TaskList", "items": items})
+				case r.Method == "PATCH" && r.URL.Path == "/apis/kelos.dev/v1alpha2/namespaces/agents/tasks/owner-repo-implementation-3":
+					body, _ := io.ReadAll(r.Body)
+					if string(body) != `{"metadata":{"annotations":{"orchestrator.kelos.dev/in-progress-labelled":"true"}}}` {
+						t.Errorf("unexpected patch: %s", body)
+					}
+					patches++
+					labelled = true
+					_, _ = w.Write([]byte(`{"apiVersion":"kelos.dev/v1alpha2","kind":"Task","metadata":{"name":"owner-repo-implementation-3","namespace":"agents"}}`))
+				case r.Method == "GET" && r.URL.Path == "/repos/owner/repo/issues":
+					if r.URL.Query().Get("labels") != "kelos-in-progress" || r.URL.Query().Get("state") != "all" {
+						t.Errorf("unexpected issue query: %s", r.URL.RawQuery)
+					}
+					_, _ = w.Write([]byte(labelledIssues))
+				case r.Method == "GET" && r.URL.Path == "/repos/owner/repo/issues/3":
+					_, _ = w.Write([]byte(tc.issue))
+				case r.Method == "POST" && r.URL.Path == "/repos/owner/repo/issues/3/labels":
+					body, _ := io.ReadAll(r.Body)
+					if string(body) != `["kelos-in-progress"]`+"\n" {
+						t.Errorf("unexpected labels: %s", body)
+					}
+					adds++
+					labelledIssues = `[{"number":3,"state":"open"}]`
+					_, _ = w.Write([]byte(`[]`))
+				case r.Method == "DELETE" && r.URL.Path == "/repos/owner/repo/issues/3/labels/kelos-in-progress":
+					removes++
+					labelledIssues = `[]`
+					_, _ = w.Write([]byte(`[]`))
+				default:
+					t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+					w.WriteHeader(500)
+				}
+			}))
+			defer server.Close()
+			client := github.NewClient(server.Client())
+			client.BaseURL, _ = url.Parse(server.URL + "/")
+			kube, err := dynamic.NewForConfig(&rest.Config{Host: server.URL})
+			if err != nil {
+				t.Fatal(err)
+			}
+			// A second poll must change nothing more.
+			for range 2 {
+				if err := implementation.Poll(context.Background(), client, kube, []string{"owner/repo"}, implementation.Config{Namespace: "agents"}, "controller[bot]"); err != nil {
+					t.Fatal(err)
+				}
+			}
+			want := func(b bool) int {
+				if b {
+					return 1
+				}
+				return 0
+			}
+			if adds != want(tc.wantAdd) || removes != want(tc.wantRemove) || patches != want(tc.wantPatch) {
+				t.Fatalf("adds=%d removes=%d patches=%d want %d %d %d", adds, removes, patches, want(tc.wantAdd), want(tc.wantRemove), want(tc.wantPatch))
 			}
 		})
 	}

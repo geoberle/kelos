@@ -1,5 +1,6 @@
-// Package implementation links the log of running implementation Tasks on
-// their issue and reports Tasks that ended without completing it.
+// Package implementation labels the issues that implementation Tasks work on,
+// links the log of running Tasks on their issue and reports Tasks that ended
+// without completing it.
 package implementation
 
 import (
@@ -54,6 +55,12 @@ const (
 	linkMarker         = "<!-- kelos-implementation-log/v1 "
 	// linkedAnnotation marks a Task whose log link is already on its issue.
 	linkedAnnotation = "orchestrator.kelos.dev/log-linked"
+	// InProgressLabel marks an open issue whose Task is running or has opened
+	// a pull request.
+	InProgressLabel = "kelos-in-progress"
+	// labelledAnnotation marks a Task whose issue was labelled, so the label
+	// is set once per Task and stays off after the issue closes.
+	labelledAnnotation = "orchestrator.kelos.dev/in-progress-labelled"
 	// captureWindow covers the time Kelos may still be reading the final
 	// message from the Pod log after it has set the completion time.
 	captureWindow = time.Minute
@@ -63,7 +70,8 @@ var tasks = schema.GroupVersionResource{Group: "kelos.dev", Version: "v1alpha2",
 
 // Poll comments on the issues of the Tasks that a TaskSpawner created from an
 // issue: once with a link to the log while a Task runs, and once when a
-// finished Task did not complete its issue. It changes no labels and never
+// finished Task did not complete its issue. It keeps InProgressLabel on the
+// open issues whose Task is running or has opened a pull request, and never
 // creates or deletes Tasks.
 func Poll(ctx context.Context, c *github.Client, k dynamic.Interface, repositories []string, config Config, controllerLogin string) error {
 	list, err := k.Resource(tasks).Namespace(config.Namespace).List(ctx, metav1.ListOptions{LabelSelector: "kelos.dev/taskspawner"})
@@ -71,6 +79,8 @@ func Poll(ctx context.Context, c *github.Client, k dynamic.Interface, repositori
 		return err
 	}
 	var failures []error
+	// working holds, per repository, the issues whose Task has not stopped.
+	working := map[string]map[int]bool{}
 	for i := range list.Items {
 		task := &list.Items[i]
 		repository, _, _ := unstructured.NestedString(task.Object, "spec", "upstreamRepo")
@@ -89,18 +99,75 @@ func Poll(ctx context.Context, c *github.Client, k dynamic.Interface, repositori
 				failures = append(failures, fmt.Errorf("%s#%d: %w", repository, number, err))
 			}
 		}
-		if annotations[reportedAnnotation] == "true" {
-			continue
-		}
-		stop, stopped := outcome(task)
+		stop, stopped := Result{}, annotations[reportedAnnotation] == "true"
 		if !stopped {
+			stop, stopped = outcome(task)
+		}
+		if !stopped {
+			if working[repository] == nil {
+				working[repository] = map[int]bool{}
+			}
+			working[repository][number] = true
+			if annotations[labelledAnnotation] != "true" {
+				if err := label(ctx, c, k, config.Namespace, owner, repo, number, task); err != nil {
+					failures = append(failures, fmt.Errorf("%s#%d: %w", repository, number, err))
+				}
+			}
+		}
+		if annotations[reportedAnnotation] == "true" || !stopped {
 			continue
 		}
 		if err := report(ctx, c, k, config.Namespace, owner, repo, number, task, controllerLogin, stop); err != nil {
 			failures = append(failures, fmt.Errorf("%s#%d: %w", repository, number, err))
 		}
 	}
+	for _, repository := range repositories {
+		owner, repo, _ := strings.Cut(repository, "/")
+		if err := unlabel(ctx, c, owner, repo, working[repository]); err != nil {
+			failures = append(failures, fmt.Errorf("%s: %w", repository, err))
+		}
+	}
 	return errors.Join(failures...)
+}
+
+// label sets InProgressLabel on the Task's issue while it is open.
+func label(ctx context.Context, c *github.Client, k dynamic.Interface, namespace, owner, repo string, number int, task *unstructured.Unstructured) error {
+	issue, _, err := c.Issues.Get(ctx, owner, repo, number)
+	if err != nil {
+		return err
+	}
+	if issue.GetState() == "open" {
+		if _, _, err := c.Issues.AddLabelsToIssue(ctx, owner, repo, number, []string{InProgressLabel}); err != nil {
+			return err
+		}
+	}
+	patch := []byte(`{"metadata":{"annotations":{"` + labelledAnnotation + `":"true"}}}`)
+	_, err = k.Resource(tasks).Namespace(namespace).Patch(ctx, task.GetName(), types.MergePatchType, patch, metav1.PatchOptions{})
+	return err
+}
+
+// unlabel removes InProgressLabel from every issue that is closed or that no
+// Task is working on.
+func unlabel(ctx context.Context, c *github.Client, owner, repo string, working map[int]bool) error {
+	opts := &github.IssueListByRepoOptions{State: "all", Labels: []string{InProgressLabel}, ListOptions: github.ListOptions{PerPage: 100}}
+	for {
+		issues, response, err := c.Issues.ListByRepo(ctx, owner, repo, opts)
+		if err != nil {
+			return err
+		}
+		for _, issue := range issues {
+			if issue.IsPullRequest() || (issue.GetState() == "open" && working[issue.GetNumber()]) {
+				continue
+			}
+			if _, err := c.Issues.RemoveLabelForIssue(ctx, owner, repo, issue.GetNumber(), InProgressLabel); err != nil {
+				return err
+			}
+		}
+		if response.NextPage == 0 {
+			return nil
+		}
+		opts.ListOptions.Page = response.NextPage
+	}
 }
 
 // outcome reads why a finished Task stopped. Kelos marks a Task Succeeded

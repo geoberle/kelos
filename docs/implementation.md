@@ -1,4 +1,4 @@
-# Implementation Tasks: log link, stop report and retry
+# Implementation Tasks: in-progress label, log link, stop report and retry
 
 Kelos sets a Task's phase from the worker's exit code. An agent that cannot
 complete its issue still exits cleanly, so Kelos reports `Succeeded` and the
@@ -6,6 +6,15 @@ issue shows no problem. Optional `configuration.implementation` with `namespace`
 (where the implementation TaskSpawners create Tasks) and the dedicated
 `controllerLogin` makes the orchestrator report such Tasks and lets a comment
 retry them.
+
+## In-progress label
+
+An open issue carries `kelos-in-progress` while its Task is running or has
+finished with a pull request. The orchestrator sets the label once per Task and
+removes it when the issue closes, which a merged pull request does through
+`Closes #N`, when the Task stopped without a pull request, and when the Task is
+gone. A pull request that is closed without merging leaves the label on its
+open issue until the issue closes or a retry stops.
 
 ## Log link
 
