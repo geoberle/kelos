@@ -256,3 +256,163 @@ func TestPollReportsStoppedTasks(t *testing.T) {
 		})
 	}
 }
+
+func TestPollLinksTheLogOfRunningTasks(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		// consoleURL is the configured Console origin; empty disables the link
+		consoleURL string
+		phase      string
+		response   string
+		linked     bool
+		// comments already on the issue
+		comments string
+		// golden file holding the expected comment; empty when none is expected
+		wantComment string
+		wantPatch   bool
+	}{
+		{
+			name:        "running task gets a link to its log",
+			consoleURL:  "https://kelos.example",
+			phase:       "Running",
+			comments:    `[]`,
+			wantComment: "log-link.golden",
+			wantPatch:   true,
+		},
+		{
+			name:        "task that has not started yet gets a link to its log",
+			consoleURL:  "https://kelos.example",
+			phase:       "",
+			comments:    `[]`,
+			wantComment: "log-link.golden",
+			wantPatch:   true,
+		},
+		{
+			name:       "no link without a configured console",
+			consoleURL: "",
+			phase:      "Running",
+		},
+		{
+			name:       "finished task gets no link",
+			consoleURL: "https://kelos.example",
+			phase:      "Succeeded",
+			response:   `{"state":"completed","pullRequest":"https://github.com/owner/repo/pull/9"}`,
+		},
+		{
+			name:       "linked task is not linked again",
+			consoleURL: "https://kelos.example",
+			phase:      "Running",
+			linked:     true,
+		},
+		{
+			name:       "link already on the issue is only recorded on the task",
+			consoleURL: "https://kelos.example",
+			phase:      "Running",
+			comments:   `[{"user":{"login":"controller[bot]"},"body":"<!-- kelos-implementation-log/v1 uid-1 -->\nlinked"}]`,
+			wantPatch:  true,
+		},
+		{
+			name:        "marker from another user does not suppress the link",
+			consoleURL:  "https://kelos.example",
+			phase:       "Running",
+			comments:    `[{"user":{"login":"someone"},"body":"<!-- kelos-implementation-log/v1 uid-1 -->\nforged"}]`,
+			wantComment: "log-link.golden",
+			wantPatch:   true,
+		},
+		{
+			name:        "retried task is linked although its predecessor was",
+			consoleURL:  "https://kelos.example",
+			phase:       "Running",
+			comments:    `[{"user":{"login":"controller[bot]"},"body":"<!-- kelos-implementation-log/v1 uid-0 -->\nlinked"}]`,
+			wantComment: "log-link.golden",
+			wantPatch:   true,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			linked := tc.linked
+			var posted []string
+			patches := 0
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				switch {
+				case r.Method == "GET" && r.URL.Path == "/apis/kelos.dev/v1alpha2/namespaces/agents/tasks":
+					annotations := map[string]any{"kelos.dev/source-kind": "issue", "kelos.dev/source-number": "3"}
+					if linked {
+						annotations["orchestrator.kelos.dev/log-linked"] = "true"
+					}
+					status := map[string]any{"phase": tc.phase, "completionTime": "2026-01-01T00:00:00Z"}
+					if len(tc.response) > 0 {
+						status["results"] = map[string]any{"response": base64.StdEncoding.EncodeToString([]byte(tc.response))}
+					}
+					_ = json.NewEncoder(w).Encode(map[string]any{
+						"apiVersion": "kelos.dev/v1alpha2", "kind": "TaskList",
+						"items": []any{map[string]any{
+							"apiVersion": "kelos.dev/v1alpha2", "kind": "Task",
+							"metadata": map[string]any{"name": "owner-repo-implementation-3", "namespace": "agents", "uid": "uid-1", "labels": map[string]any{"kelos.dev/taskspawner": "owner-repo-implementation"}, "annotations": annotations},
+							"spec":     map[string]any{"branch": "agent/issue-3", "upstreamRepo": "owner/repo"},
+							"status":   status,
+						}},
+					})
+				case r.Method == "PATCH" && r.URL.Path == "/apis/kelos.dev/v1alpha2/namespaces/agents/tasks/owner-repo-implementation-3":
+					body, _ := io.ReadAll(r.Body)
+					if string(body) != `{"metadata":{"annotations":{"orchestrator.kelos.dev/log-linked":"true"}}}` {
+						t.Errorf("unexpected patch: %s", body)
+					}
+					patches++
+					linked = true
+					_, _ = w.Write([]byte(`{"apiVersion":"kelos.dev/v1alpha2","kind":"Task","metadata":{"name":"owner-repo-implementation-3","namespace":"agents"}}`))
+				case r.Method == "GET" && r.URL.Path == "/repos/owner/repo/issues/3/comments":
+					_, _ = w.Write([]byte(tc.comments))
+				case r.Method == "POST" && r.URL.Path == "/repos/owner/repo/issues/3/comments":
+					var comment struct {
+						Body string `json:"body"`
+					}
+					if err := json.NewDecoder(r.Body).Decode(&comment); err != nil {
+						t.Error(err)
+					}
+					posted = append(posted, comment.Body)
+					_, _ = w.Write([]byte(`{}`))
+				default:
+					t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+					w.WriteHeader(500)
+				}
+			}))
+			defer server.Close()
+			client := github.NewClient(server.Client())
+			client.BaseURL, _ = url.Parse(server.URL + "/")
+			kube, err := dynamic.NewForConfig(&rest.Config{Host: server.URL})
+			if err != nil {
+				t.Fatal(err)
+			}
+			// A second poll must not link the same Task again.
+			for range 2 {
+				if err := implementation.Poll(context.Background(), client, kube, []string{"owner/repo"}, implementation.Config{Namespace: "agents", ConsoleURL: tc.consoleURL}, "controller[bot]"); err != nil {
+					t.Fatal(err)
+				}
+			}
+			wantPatches := 0
+			if tc.wantPatch {
+				wantPatches = 1
+			}
+			if patches != wantPatches {
+				t.Fatalf("patches=%d want %d", patches, wantPatches)
+			}
+			if len(tc.wantComment) == 0 {
+				if len(posted) != 0 {
+					t.Fatalf("unexpected comments: %q", posted)
+				}
+				return
+			}
+			if len(posted) != 1 {
+				t.Fatalf("comments=%d want 1: %q", len(posted), posted)
+			}
+			want, err := os.ReadFile("testdata/" + tc.wantComment)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if posted[0] != string(want) {
+				t.Fatalf("comment:\n%s\nwant:\n%s", posted[0], want)
+			}
+		})
+	}
+}
