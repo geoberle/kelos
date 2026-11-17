@@ -25,6 +25,10 @@ func TestHasCommand(t *testing.T) {
 		{name: "longer word that starts with the command", body: "/lgtmx", command: "/lgtm", want: false},
 		{name: "quoted command", body: "> /lgtm", command: "/lgtm", want: false},
 		{name: "another command", body: "/reassess", command: "/lgtm", want: false},
+		{name: "command of two words", body: "/kelos run", command: "/kelos run", want: true},
+		{name: "command of two words with a remark", body: "retry please\n/kelos   run now", command: "/kelos run", want: true},
+		{name: "first word of a two word command only", body: "/kelos", command: "/kelos run", want: false},
+		{name: "two word command with another second word", body: "/kelos stop", command: "/kelos run", want: false},
 		{name: "empty comment", body: "", command: "/lgtm", want: false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

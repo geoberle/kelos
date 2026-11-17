@@ -1,19 +1,26 @@
 package feedback
 
-import "strings"
+import (
+	"slices"
+	"strings"
+)
 
 const (
 	// ApproveCommand is the human approval of a pull request head.
 	ApproveCommand = "/lgtm"
 	// ReassessCommand requests another merge assessment.
 	ReassessCommand = "/reassess"
+	// RunCommand starts an implementation Task from an issue. Kelos reads it;
+	// on a pull request it has no effect.
+	RunCommand = "/kelos run"
 )
 
 // HasCommand reports whether a line of the comment starts with the command,
-// as its first word. Text after the command, and on other lines, is a remark.
+// as its first words. Text after the command, and on other lines, is a remark.
 func HasCommand(body, command string) bool {
+	want := strings.Fields(command)
 	for _, line := range strings.Split(body, "\n") {
-		if words := strings.Fields(line); len(words) > 0 && words[0] == command {
+		if words := strings.Fields(line); len(words) >= len(want) && slices.Equal(words[:len(want)], want) {
 			return true
 		}
 	}

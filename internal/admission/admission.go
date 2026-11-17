@@ -7,11 +7,13 @@ import (
 	"strings"
 
 	"github.com/google/go-github/v80/github"
+
+	"github.com/hearthctl/kelos-orchestrator/internal/feedback"
 )
 
 // RunCommand is the comment the implementation TaskSpawner requires before it
 // starts or retries a Task. Kelos matches it only at the start of a line.
-const RunCommand = "/kelos run"
+const RunCommand = feedback.RunCommand
 
 // Poll reconciles admission labels only in the explicit repository allowlist.
 // With a controller identity it also posts RunCommand once per issue when
