@@ -289,7 +289,18 @@ func TestGuardedMerge(t *testing.T) {
 			c := github.NewClient(server.Client())
 			c.BaseURL, _ = url.Parse(server.URL + "/")
 			// One reconciliation must be enough to merge an eligible PR; restart must not duplicate it.
-			_ = merge.Poll(context.Background(), c, review.NewCache(), []string{"owner/repo"}, "controller")
+			pollErr := merge.Poll(context.Background(), c, review.NewCache(), []string{"owner/repo"}, "controller")
+			// A check that is still running is waited for, not reported as a failure.
+			switch tc.name {
+			case "pending check blocks merge", "latest pending check blocks old success":
+				if pollErr != nil {
+					t.Fatalf("a running check was reported as a failure: %v", pollErr)
+				}
+			case "failed check blocks merge":
+				if pollErr == nil {
+					t.Fatal("a failed check was not reported")
+				}
+			}
 			if tc.name == "stale approval stays revoked when head returns" {
 				for phase = 1; phase <= 2; phase++ {
 					_ = merge.Poll(context.Background(), c, review.NewCache(), []string{"owner/repo"}, "controller")

@@ -47,6 +47,8 @@ func Poll(ctx context.Context, c *github.Client, cache *review.Cache, repositori
 				switch {
 				case errors.Is(err, errVerifying):
 					verifying[branch] = true
+				case errors.Is(err, errChecking):
+					// Looked at again on the next poll.
 				case errors.Is(err, errUnverified):
 					if oldest := unverified[branch]; oldest == nil || pr.GetNumber() < oldest.GetNumber() {
 						unverified[branch] = pr

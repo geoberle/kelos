@@ -120,7 +120,7 @@ func requiredCI(ctx context.Context, c *github.Client, owner, repo string, pr *g
 	for name, apps := range checks {
 		for _, check := range apps {
 			if check.GetStatus() != "completed" {
-				return fmt.Errorf("check %s is not complete", name)
+				return fmt.Errorf("check %s is not complete: %w", name, errChecking)
 			}
 			switch check.GetConclusion() {
 			case "success", "skipped", "neutral":
@@ -137,6 +137,10 @@ func requiredCI(ctx context.Context, c *github.Client, owner, repo string, pr *g
 	}
 	return nil
 }
+
+// errChecking reports that a check on the commit is still running. The
+// controller waits for it; that is not a failure.
+var errChecking = errors.New("waiting for the check to finish")
 
 // missingCheck is a check the target branch requires that has not run on the
 // pull request's commit.

@@ -93,7 +93,7 @@ func Assess(ctx context.Context, c *github.Client, cache *review.Cache, k dynami
 			}
 			for _, pr := range prs {
 				if label(pr, "agent-managed") {
-					if err := assess(ctx, c, cache, k, owner, repo, pr, config, controller); err != nil {
+					if err := assess(ctx, c, cache, k, owner, repo, pr, config, controller); err != nil && !errors.Is(err, errChecking) {
 						failures = append(failures, fmt.Errorf("%s#%d: %w", repository, pr.GetNumber(), err))
 					}
 				}
@@ -167,6 +167,31 @@ func writeAssessments(ctx context.Context, c *github.Client, owner, repo string,
 		return fmt.Errorf("assessment credential does not match controller")
 	}
 	return nil
+}
+
+// humanApproved reports whether the controller recorded a human approval of
+// the head that is still valid. The merge loop writes and invalidates these
+// records; here they are only read.
+func humanApproved(comments []*github.IssueComment, controller, head string) bool {
+	humans := map[int64]bool{}
+	for _, comment := range comments {
+		if comment.GetUser().GetLogin() == "geoberle" && isApproval(comment.GetBody()) {
+			humans[comment.GetID()] = true
+		}
+	}
+	for _, comment := range comments {
+		if comment.GetUser().GetLogin() != controller || !strings.HasPrefix(comment.GetBody(), evidenceMarker) {
+			continue
+		}
+		var record approvalRecord
+		if json.Unmarshal([]byte(strings.TrimPrefix(comment.GetBody(), evidenceMarker)), &record) != nil {
+			continue
+		}
+		if !record.Invalidated && record.SHA == head && humans[record.ApprovalID] {
+			return true
+		}
+	}
+	return false
 }
 
 // isReassess reports whether a comment is the command that requests another
@@ -260,6 +285,11 @@ func assess(ctx context.Context, c *github.Client, cache *review.Cache, k dynami
 			return err
 		}
 		return assessmentLabel(ctx, c, cache, owner, repo, pr.GetNumber(), controller)
+	}
+	// A human who approved this head has decided. An assessment would only
+	// repeat or contradict that; an explicit request still gets one.
+	if index < 0 && request == 0 && humanApproved(comments, controller, pr.GetHead().GetSHA()) {
+		return nil
 	}
 	if index < 0 || history.Attempts[index].Request != request {
 		name := fmt.Sprintf("assessment-%x", sha256.Sum256([]byte(fmt.Sprintf("%s/%s/%d/%s/%d", owner, repo, pr.GetNumber(), pr.GetHead().GetSHA(), request))))[:59]
