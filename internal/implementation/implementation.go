@@ -1,5 +1,5 @@
-// Package implementation reports implementation Tasks that ended without
-// completing their issue.
+// Package implementation links the log of running implementation Tasks on
+// their issue and reports Tasks that ended without completing it.
 package implementation
 
 import (
@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"slices"
 	"strconv"
 	"strings"
@@ -26,6 +27,9 @@ import (
 type Config struct {
 	// Namespace holds the Tasks that the implementation TaskSpawners create.
 	Namespace string `json:"namespace"`
+	// ConsoleURL is the origin of the Kelos Console, without a path. When set,
+	// the issue of a running Task gets a link to the Task's log there.
+	ConsoleURL string `json:"consoleURL,omitempty"`
 }
 
 // Result is the final message an implementation agent must end with.
@@ -47,6 +51,9 @@ const (
 	// reportedAnnotation marks a Task whose stop is already on its issue, so
 	// finished Tasks cost no GitHub requests on later polls.
 	reportedAnnotation = "orchestrator.kelos.dev/stop-reported"
+	linkMarker         = "<!-- kelos-implementation-log/v1 "
+	// linkedAnnotation marks a Task whose log link is already on its issue.
+	linkedAnnotation = "orchestrator.kelos.dev/log-linked"
 	// captureWindow covers the time Kelos may still be reading the final
 	// message from the Pod log after it has set the completion time.
 	captureWindow = time.Minute
@@ -54,9 +61,10 @@ const (
 
 var tasks = schema.GroupVersionResource{Group: "kelos.dev", Version: "v1alpha2", Resource: "tasks"}
 
-// Poll comments once on the issue of every finished Task that a TaskSpawner
-// created from an issue and that did not complete it. It changes no labels and
-// never creates or deletes Tasks.
+// Poll comments on the issues of the Tasks that a TaskSpawner created from an
+// issue: once with a link to the log while a Task runs, and once when a
+// finished Task did not complete its issue. It changes no labels and never
+// creates or deletes Tasks.
 func Poll(ctx context.Context, c *github.Client, k dynamic.Interface, repositories []string, config Config, controllerLogin string) error {
 	list, err := k.Resource(tasks).Namespace(config.Namespace).List(ctx, metav1.ListOptions{LabelSelector: "kelos.dev/taskspawner"})
 	if err != nil {
@@ -67,18 +75,27 @@ func Poll(ctx context.Context, c *github.Client, k dynamic.Interface, repositori
 		task := &list.Items[i]
 		repository, _, _ := unstructured.NestedString(task.Object, "spec", "upstreamRepo")
 		annotations := task.GetAnnotations()
-		if !slices.Contains(repositories, repository) || annotations["kelos.dev/source-kind"] != "issue" || annotations[reportedAnnotation] == "true" {
+		if !slices.Contains(repositories, repository) || annotations["kelos.dev/source-kind"] != "issue" {
 			continue
 		}
 		number, err := strconv.Atoi(annotations["kelos.dev/source-number"])
 		if err != nil {
 			continue
 		}
+		owner, repo, _ := strings.Cut(repository, "/")
+		phase, _, _ := unstructured.NestedString(task.Object, "status", "phase")
+		if len(config.ConsoleURL) > 0 && annotations[linkedAnnotation] != "true" && phase != "Succeeded" && phase != "Failed" {
+			if err := link(ctx, c, k, config, owner, repo, number, task, controllerLogin); err != nil {
+				failures = append(failures, fmt.Errorf("%s#%d: %w", repository, number, err))
+			}
+		}
+		if annotations[reportedAnnotation] == "true" {
+			continue
+		}
 		stop, stopped := outcome(task)
 		if !stopped {
 			continue
 		}
-		owner, repo, _ := strings.Cut(repository, "/")
 		if err := report(ctx, c, k, config.Namespace, owner, repo, number, task, controllerLogin, stop); err != nil {
 			failures = append(failures, fmt.Errorf("%s#%d: %w", repository, number, err))
 		}
@@ -117,25 +134,54 @@ func outcome(task *unstructured.Unstructured) (Result, bool) {
 	return Result{Reason: "The Task ended without a readable final result. Its final message was:\n\n" + string(raw), Next: "Read the final message above, correct the issue or the branch, then retry."}, true
 }
 
-func report(ctx context.Context, c *github.Client, k dynamic.Interface, namespace, owner, repo string, number int, task *unstructured.Unstructured, controllerLogin string, stop Result) error {
+// link comments once on the issue with the address of the Task's log in the
+// Console. The Console has no address for a Task's page, only for its log.
+func link(ctx context.Context, c *github.Client, k dynamic.Interface, config Config, owner, repo string, number int, task *unstructured.Unstructured, controllerLogin string) error {
 	// A retry replaces the Task under the same name, so the UID identifies the attempt.
-	marker := reportMarker + string(task.GetUID()) + " -->"
-	found := false
+	marker := linkMarker + string(task.GetUID()) + " -->"
+	found, err := commented(ctx, c, owner, repo, number, controllerLogin, marker)
+	if err != nil {
+		return err
+	}
+	if !found {
+		log := strings.TrimRight(config.ConsoleURL, "/") + "/api/resources/tasks/" + url.PathEscape(config.Namespace) + "/" + url.PathEscape(task.GetName()) + "/logs"
+		body := marker + "\nKelos Task `" + task.GetName() + "` is working on this issue. [Open its log](" + log + "): the latest 2,000 lines, shown to a browser that is logged in to the Kelos Console."
+		if _, _, err := c.Issues.CreateComment(ctx, owner, repo, number, &github.IssueComment{Body: github.Ptr(body)}); err != nil {
+			return err
+		}
+	}
+	patch := []byte(`{"metadata":{"annotations":{"` + linkedAnnotation + `":"true"}}}`)
+	_, err = k.Resource(tasks).Namespace(config.Namespace).Patch(ctx, task.GetName(), types.MergePatchType, patch, metav1.PatchOptions{})
+	return err
+}
+
+// commented reports whether the controller already posted a comment that
+// starts with the marker on the issue.
+func commented(ctx context.Context, c *github.Client, owner, repo string, number int, controllerLogin, marker string) (bool, error) {
 	opts := &github.IssueListCommentsOptions{ListOptions: github.ListOptions{PerPage: 100}}
-	for !found {
+	for {
 		comments, response, err := c.Issues.ListComments(ctx, owner, repo, number, opts)
 		if err != nil {
-			return err
+			return false, err
 		}
 		for _, comment := range comments {
 			if comment.GetUser().GetLogin() == controllerLogin && strings.HasPrefix(comment.GetBody(), marker) {
-				found = true
+				return true, nil
 			}
 		}
 		if response.NextPage == 0 {
-			break
+			return false, nil
 		}
 		opts.Page = response.NextPage
+	}
+}
+
+func report(ctx context.Context, c *github.Client, k dynamic.Interface, namespace, owner, repo string, number int, task *unstructured.Unstructured, controllerLogin string, stop Result) error {
+	// A retry replaces the Task under the same name, so the UID identifies the attempt.
+	marker := reportMarker + string(task.GetUID()) + " -->"
+	found, err := commented(ctx, c, owner, repo, number, controllerLogin, marker)
+	if err != nil {
+		return err
 	}
 	if !found {
 		branch, _, _ := unstructured.NestedString(task.Object, "spec", "branch")
@@ -156,7 +202,7 @@ func report(ctx context.Context, c *github.Client, k dynamic.Interface, namespac
 		}
 	}
 	patch := []byte(`{"metadata":{"annotations":{"` + reportedAnnotation + `":"true"}}}`)
-	_, err := k.Resource(tasks).Namespace(namespace).Patch(ctx, task.GetName(), types.MergePatchType, patch, metav1.PatchOptions{})
+	_, err = k.Resource(tasks).Namespace(namespace).Patch(ctx, task.GetName(), types.MergePatchType, patch, metav1.PatchOptions{})
 	return err
 }
 

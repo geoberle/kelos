@@ -23,3 +23,4 @@ resources:
 
 # configuration.assessment: {namespace: kelos-agents, workspaces: {owner/repo: read-only-repo}, agentConfig: assessment, secret: kelos-openai}
 # configuration.implementation: {namespace: kelos-agents} reports stopped implementation Tasks and posts the run command on admission.
+# Its optional consoleURL (the Kelos Console origin) adds a link to the Task's log on the issue while the Task runs.

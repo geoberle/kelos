@@ -1,4 +1,4 @@
-# Implementation Tasks: stop report and retry
+# Implementation Tasks: log link, stop report and retry
 
 Kelos sets a Task's phase from the worker's exit code. An agent that cannot
 complete its issue still exits cleanly, so Kelos reports `Succeeded` and the
@@ -6,6 +6,15 @@ issue shows no problem. Optional `configuration.implementation` with `namespace`
 (where the implementation TaskSpawners create Tasks) and the dedicated
 `controllerLogin` makes the orchestrator report such Tasks and lets a comment
 retry them.
+
+## Log link
+
+With `consoleURL` set to the origin of the Kelos Console, the orchestrator
+comments once on the issue of every Task that has not finished, with a link to
+the Task's log in the Console. A retried Task gets its own comment. The Console
+has an address for a Task's log but none for its page, so the link shows the raw
+log: the latest 2,000 lines, and only to a browser that is logged in. A Task
+that finishes within one poll gets no link.
 
 ## Final result
 
