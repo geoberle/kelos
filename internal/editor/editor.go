@@ -22,6 +22,7 @@ import (
 	"k8s.io/client-go/dynamic"
 
 	"github.com/hearthctl/kelos-orchestrator/internal/feedback"
+	"github.com/hearthctl/kelos-orchestrator/internal/merge"
 	"github.com/hearthctl/kelos-orchestrator/internal/review"
 )
 
@@ -35,6 +36,10 @@ type Config struct {
 
 // recordedAnnotation marks an editor Task whose result is fully processed.
 const recordedAnnotation = "orchestrator.kelos.dev/result-recorded"
+
+// maxAssessmentRounds bounds the editor Tasks started for defects the
+// assessment found on one PR.
+const maxAssessmentRounds = 2
 
 // maxReviewRounds bounds the editor Tasks started for OCR findings on one PR.
 const maxReviewRounds = 5
@@ -227,40 +232,37 @@ func reconcile(ctx context.Context, c *github.Client, cache *review.Cache, k dyn
 		return err
 	}
 	if check != nil {
-		rounds := 0
-		for _, task := range existing.Items {
-			var assigned Assignment
-			if err := json.Unmarshal([]byte(task.GetAnnotations()["orchestrator.kelos.dev/assignment"]), &assigned); err != nil {
-				return err
-			}
-			for _, f := range assigned.Findings {
-				if f.ID == check.ID {
-					return nil
-				}
-				if strings.HasPrefix(f.ID, checkPrefix) {
-					rounds++
-				}
-			}
+		assigned, rounds, err := repairRounds(existing.Items, check.ID, checkPrefix)
+		if err != nil || assigned {
+			return err
 		}
 		// A repair that keeps failing the check must not run forever.
 		if rounds >= maxCheckRounds {
-			// Reported once per PR, under a name no editor Task has.
-			limit := &unstructured.Unstructured{}
-			limit.SetName("check-round-limit")
-			return reportFailure(ctx, c, owner, repo, pr, limit, controllerLogin, fmt.Errorf("round limit of %d check repairs reached", maxCheckRounds))
+			return reportLimit(ctx, c, owner, repo, pr, controllerLogin, "check-round-limit", fmt.Errorf("round limit of %d check repairs reached", maxCheckRounds))
 		}
 		excerpt, err := checkLog(ctx, c, owner, repo, job)
 		if err != nil {
 			return err
 		}
 		check.Content += excerpt
-		assignment := Assignment{Repository: owner + "/" + repo, PR: pr.GetNumber(), Head: pr.GetHead().GetSHA(), Findings: []Finding{*check}}
-		encoded, err := json.Marshal(assignment)
-		if err != nil {
+		return assign(ctx, c, k, config, owner, repo, pr, key, *check)
+	}
+	// The assessment runs the change and finds defects a review of the diff
+	// misses. One it can state concretely is repaired like any finding.
+	defect, err := merge.FixRequest(ctx, c, owner, repo, pr, controllerLogin)
+	if err != nil {
+		return err
+	}
+	if defect != nil {
+		assigned, rounds, err := repairRounds(existing.Items, defect.ID, merge.FixPrefix)
+		if err != nil || assigned {
 			return err
 		}
-		name := "editor-" + key + "-" + fmt.Sprintf("%x", sha256.Sum256(encoded))[:16]
-		return create(ctx, c, k, config, owner, repo, pr, assignment, key, name)
+		// Assessment and repair may never agree.
+		if rounds >= maxAssessmentRounds {
+			return reportLimit(ctx, c, owner, repo, pr, controllerLogin, "assessment-round-limit", fmt.Errorf("round limit of %d assessment repairs reached", maxAssessmentRounds))
+		}
+		return assign(ctx, c, k, config, owner, repo, pr, key, *defect)
 	}
 	evidence, err := review.CurrentEvidence(ctx, c, cache, owner, repo, pr, controllerLogin)
 	if err != nil || evidence == nil {
@@ -344,6 +346,45 @@ func reconcile(ctx context.Context, c *github.Client, cache *review.Cache, k dyn
 	if len(assignment.Findings) == 0 {
 		return nil
 	}
+	return create(ctx, c, k, config, owner, repo, pr, assignment, key, name)
+}
+
+// repairRounds reports whether an editor Task was already assigned the
+// finding, and how many Tasks of this PR were assigned a finding of its kind.
+func repairRounds(existing []unstructured.Unstructured, id, prefix string) (bool, int, error) {
+	rounds := 0
+	for _, task := range existing {
+		var assigned Assignment
+		if err := json.Unmarshal([]byte(task.GetAnnotations()["orchestrator.kelos.dev/assignment"]), &assigned); err != nil {
+			return false, 0, err
+		}
+		for _, f := range assigned.Findings {
+			if f.ID == id {
+				return true, 0, nil
+			}
+			if strings.HasPrefix(f.ID, prefix) {
+				rounds++
+			}
+		}
+	}
+	return false, rounds, nil
+}
+
+// reportLimit reports a round limit once per PR, under a name no editor Task has.
+func reportLimit(ctx context.Context, c *github.Client, owner, repo string, pr *github.PullRequest, controllerLogin, name string, cause error) error {
+	limit := &unstructured.Unstructured{}
+	limit.SetName(name)
+	return reportFailure(ctx, c, owner, repo, pr, limit, controllerLogin, cause)
+}
+
+// assign starts an editor Task for one finding on the PR head.
+func assign(ctx context.Context, c *github.Client, k dynamic.Interface, config Config, owner, repo string, pr *github.PullRequest, key string, finding Finding) error {
+	assignment := Assignment{Repository: owner + "/" + repo, PR: pr.GetNumber(), Head: pr.GetHead().GetSHA(), Findings: []Finding{finding}}
+	encoded, err := json.Marshal(assignment)
+	if err != nil {
+		return err
+	}
+	name := "editor-" + key + "-" + fmt.Sprintf("%x", sha256.Sum256(encoded))[:16]
 	return create(ctx, c, k, config, owner, repo, pr, assignment, key, name)
 }
 

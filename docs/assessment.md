@@ -18,10 +18,18 @@ a different Kubernetes UID is rejected.
 
 The Codex final response is read from base64 `status.results.response`. It must
 be exactly one JSON object with string fields `commit`, `recommendation` and
-`reason`. The commit must match, the recommendation is `approve` or `needs-human`,
-and the reason must be nonempty. Unknown/duplicate fields, trailing JSON,
+`reason`. The commit must match, the recommendation is `approve`, `needs-fix`
+or `needs-human`, and the reason must be nonempty. Unknown/duplicate fields, trailing JSON,
 malformed output and oversized results do not approve. Task success alone is
 not approval.
+
+`needs-fix` is for a concrete defect in the change that the assessment can
+state with its trigger and consequence and that a code change can repair. The
+editor takes the reason as a finding, `assessment/<owner>/<repo>/<pr>/<task>`,
+and repairs it; the new head is reviewed and assessed again. At most two such
+repairs run per PR, then the controller reports once and waits for a person.
+`needs-human` remains for what needs judgement: an accepted risk, licensing,
+behaviour that only hardware shows.
 
 A single controller-owned `kelos-assessment/v1` PR comment retains attempt
 identity, Task UID, head, request, state and concise explanation. Terminal
