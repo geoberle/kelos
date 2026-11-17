@@ -31,6 +31,12 @@ The issue comment `/kelos run` that starts an implementation Task. Issue admissi
 **Stop report**:
 The comment on an issue stating why its implementation Task ended without completing the issue, which acceptance criteria are unmet, and how to proceed.
 
+**Verify**:
+The checks every repository runs with `make verify`, needing no infrastructure beyond its toolchain. An agent passes them before it opens a pull request, and CI reports them as the one check named `verify`.
+
+**E2E**:
+The optional checks a repository runs with `make e2e` because they need infrastructure an agent pod lacks. Only CI runs them, as part of the `verify` check.
+
 **Must-fix finding**:
 A demonstrated correctness, security, compatibility, or operational problem, or a material violation of an agreed requirement. The only kind of finding the reviewer is asked to report.
 

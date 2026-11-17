@@ -40,8 +40,9 @@ rotating it. The Helm chart references an existing Secret named by
 `credentialSecret`, with `appID`, `installationID` and `privateKey` keys. Do not put credentials in values or source control. Configure
 `imagePullSecrets` for private GHCR access. No Service or inbound listener exists.
 
-`make fmt`, `make fmt-check`, `make lint`, `make lint-fix`, `make test`, `make build`,
-`make image`, and `make chart` provide local equivalents of CI. Helm 3.19.2 and a
+`make verify` runs what the `verify` check runs: `make fmt-check`, `make lint`,
+`make test`, `make build` and `make chart`. `make fmt` and `make lint-fix` repair
+findings, and `make image` is the local equivalent of the CI image build. Helm 3.19.2 and a
 Docker Buildx-capable daemon are required for packaging checks. Go formatter and
 linter versions are pinned in Makefile.
 

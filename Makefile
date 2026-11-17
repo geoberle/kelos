@@ -1,9 +1,13 @@
-.PHONY: test build fmt fmt-check lint lint-fix image chart
+.PHONY: verify test build fmt fmt-check lint lint-fix image chart
 GOLANGCI = go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.8.0
 GOIMPORTS = go run golang.org/x/tools/cmd/goimports@v0.39.0
 
+# The race runtime cannot start on every host, such as a Raspberry Pi 5.
+RACE = $(shell go test -race -count=1 -run '^$$' errors >/dev/null 2>&1 && echo -race)
+
+verify: fmt-check lint test build chart
 test:
-	go test -race ./...
+	go test $(RACE) ./...
 build:
 	go build -o bin/orchestrator ./cmd/orchestrator
 fmt:
