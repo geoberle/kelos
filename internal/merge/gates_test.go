@@ -46,6 +46,8 @@ func TestGuardedMerge(t *testing.T) {
 		{"linear history blocks merge", false},
 		{"merge method restriction blocks merge", false},
 		{"other rules do not block merge", true},
+		{"required check that has not run blocks merge and is named once", false},
+		{"required check reported as a commit status allows merge", true},
 		{"check on a different head is rejected", false},
 		{"merge response lost before mutation can retry next poll", false},
 		{"failed test merge checks override green head", false},
@@ -208,6 +210,11 @@ func TestGuardedMerge(t *testing.T) {
 						body = `[{"type":"pull_request","parameters":{}},{"type":"required_linear_history"}]`
 					case "merge method restriction blocks merge":
 						body = `[{"type":"pull_request","parameters":{"allowed_merge_methods":["squash","rebase"]}}]`
+					case "required check that has not run blocks merge and is named once":
+						// The commit only has the check "test".
+						body = `[{"type":"pull_request","parameters":{}},{"type":"required_status_checks","parameters":{"required_status_checks":[{"context":"verify"},{"context":"test"}]}}]`
+					case "required check reported as a commit status allows merge":
+						body = `[{"type":"pull_request","parameters":{}},{"type":"required_status_checks","parameters":{"required_status_checks":[{"context":"verify-base"}]}}]`
 					case "other rules do not block merge":
 						body = `[{"type":"pull_request","parameters":{"allowed_merge_methods":["merge","squash"]}},{"type":"deletion"},{"type":"non_fast_forward"},{"type":"required_status_checks","parameters":{"required_status_checks":[{"context":"test"}]}},{"type":"future_policy"}]`
 					}
@@ -302,6 +309,27 @@ func TestGuardedMerge(t *testing.T) {
 			}
 			if merged != tc.wantMerge {
 				t.Fatalf("merged=%v want %v", merged, tc.wantMerge)
+			}
+			// A second poll must not name the block again.
+			if tc.name == "required check that has not run blocks merge and is named once" {
+				_ = merge.Poll(context.Background(), c, review.NewCache(), []string{"owner/repo"}, "controller")
+			}
+			var blocked []string
+			for _, comment := range ledger {
+				if strings.HasPrefix(comment.GetBody(), "<!-- kelos-merge-blocked/v1 ") {
+					blocked = append(blocked, comment.GetBody())
+				}
+			}
+			if tc.name == "required check that has not run blocks merge and is named once" {
+				want, err := os.ReadFile("testdata/blocked.golden")
+				if err != nil {
+					t.Fatal(err)
+				}
+				if len(blocked) != 1 || blocked[0] != strings.TrimSuffix(string(want), "\n") {
+					t.Fatalf("block notices: %q", blocked)
+				}
+			} else if len(blocked) != 0 {
+				t.Fatalf("unexpected block notices: %q", blocked)
 			}
 			if tc.wantMerge {
 				_ = merge.Poll(context.Background(), c, review.NewCache(), []string{"owner/repo"}, "controller")

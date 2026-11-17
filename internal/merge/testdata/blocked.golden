@@ -1,0 +1,2 @@
+<!-- kelos-merge-blocked/v1 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa -->
+This pull request is approved but cannot merge: the required check `verify` has not run on commit aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa. The branch probably predates the workflow that reports it. Rebase it onto `main`; commenting `/kelos run` on its issue lets the agent do that.
