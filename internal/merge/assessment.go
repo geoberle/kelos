@@ -53,6 +53,17 @@ const fixState = "needs-fix"
 // FixPrefix starts the ID of a finding that stands for such a defect.
 const FixPrefix = "assessment/"
 
+// FixRequestOf returns the /reassess comment a defect finding belongs to, the
+// part of its ID before the Task name, or 0 when no human asked for a
+// reassessment. Repairs are counted per request.
+func FixRequestOf(id string) string {
+	parts := strings.Split(id, "/")
+	if len(parts) < 2 {
+		return "0"
+	}
+	return parts[len(parts)-2]
+}
+
 // FixRequest returns the defect the newest assessment found on the PR head as
 // a finding for the editor, or nil when it found none.
 func FixRequest(ctx context.Context, c *github.Client, owner, repo string, pr *github.PullRequest, controller string) (*feedback.Finding, error) {
@@ -68,8 +79,14 @@ func FixRequest(ctx context.Context, c *github.Client, owner, repo string, pr *g
 	if latest.State != fixState || latest.Head != pr.GetHead().GetSHA() {
 		return nil, nil
 	}
+	// The newest /reassess on the pull request renews the repair budget, so
+	// the finding names it. A request is a comment ID and only grows.
+	request := int64(0)
+	for _, attempt := range history.Attempts {
+		request = max(request, attempt.Request)
+	}
 	return &feedback.Finding{
-		ID:      fmt.Sprintf("%s%s/%s/%d/%s", FixPrefix, owner, repo, pr.GetNumber(), latest.Task),
+		ID:      fmt.Sprintf("%s%s/%s/%d/%d/%s", FixPrefix, owner, repo, pr.GetNumber(), request, latest.Task),
 		Content: "The merge assessment found this defect in the pull request:\n\n" + latest.Reason,
 		Source:  existing.GetHTMLURL(),
 	}, nil

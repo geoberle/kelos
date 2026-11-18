@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"strings"
 	"testing"
 
@@ -21,6 +22,8 @@ import (
 func TestDefectFoundByTheAssessmentStartsEditor(t *testing.T) {
 	// The controller's assessment history: the newest assessment found a defect on the head.
 	defect := `[{"id":7,"html_url":"https://github.com/owner/repo/pull/1#issuecomment-7","user":{"login":"controller"},"body":"<!-- kelos-assessment/v1 -->\n{\"attempts\":[{\"task\":\"assessment-a\",\"head\":\"head\",\"state\":\"needs-fix\",\"reason\":\"Removing a Slot deletes an Item on the wrong Page.\"}]}"}]`
+	// The same, after the human asked for a reassessment on an earlier head.
+	defectAfterRequest := `[{"id":7,"html_url":"https://github.com/owner/repo/pull/1#issuecomment-7","user":{"login":"controller"},"body":"<!-- kelos-assessment/v1 -->\n{\"attempts\":[{\"task\":\"assessment-r\",\"head\":\"old\",\"request\":500,\"state\":\"invalidated\",\"reason\":\"PR head changed.\"},{\"task\":\"assessment-a\",\"head\":\"head\",\"state\":\"needs-fix\",\"reason\":\"Removing a Slot deletes an Item on the wrong Page.\"}]}"}]`
 	for _, tc := range []struct {
 		name string
 		// comments is GitHub's list of conversation comments on the pull request
@@ -44,18 +47,30 @@ func TestDefectFoundByTheAssessmentStartsEditor(t *testing.T) {
 		{
 			name:     "defect that an editor already had starts nothing",
 			comments: defect,
-			assigned: []string{"assessment/owner/repo/1/assessment-a"},
+			assigned: []string{"assessment/owner/repo/1/0/assessment-a"},
 		},
 		{
-			name:     "new defect after an earlier repair starts another editor",
+			name:     "new defect after two earlier repairs starts another editor",
 			comments: defect,
-			assigned: []string{"assessment/owner/repo/1/assessment-0"},
+			assigned: []string{"assessment/owner/repo/1/0/assessment-0", "assessment/owner/repo/1/0/assessment-1"},
 			wantTask: true,
 		},
 		{
 			name:      "round limit stops further editors",
 			comments:  defect,
-			assigned:  []string{"assessment/owner/repo/1/assessment-0", "assessment/owner/repo/1/assessment-1"},
+			assigned:  []string{"assessment/owner/repo/1/0/assessment-0", "assessment/owner/repo/1/0/assessment-1", "assessment/owner/repo/1/0/assessment-2"},
+			wantLimit: true,
+		},
+		{
+			name:     "reassess request renews the budget",
+			comments: defectAfterRequest,
+			assigned: []string{"assessment/owner/repo/1/0/assessment-0", "assessment/owner/repo/1/0/assessment-1", "assessment/owner/repo/1/0/assessment-2"},
+			wantTask: true,
+		},
+		{
+			name:      "round limit applies again after the request",
+			comments:  defectAfterRequest,
+			assigned:  []string{"assessment/owner/repo/1/500/assessment-3", "assessment/owner/repo/1/500/assessment-4", "assessment/owner/repo/1/500/assessment-5"},
 			wantLimit: true,
 		},
 	} {
@@ -121,10 +136,19 @@ func TestDefectFoundByTheAssessmentStartsEditor(t *testing.T) {
 			}
 			err = editor.Poll(context.Background(), client, review.NewCache(), kube, []string{"owner/repo"}, editor.Config{Namespace: "agents", Workspaces: map[string]string{"owner/repo": "repo"}, AgentConfig: "editor", Secret: "codex"}, "controller")
 			if tc.wantLimit {
-				if err == nil || !strings.Contains(err.Error(), "round limit of 2 assessment repairs reached") {
+				if err == nil || !strings.Contains(err.Error(), "round limit of 3 assessment repairs reached") {
 					t.Fatalf("error=%v want the round limit", err)
 				}
-				if len(created) != 0 || len(posted) != 1 || !strings.HasPrefix(posted[0], "<!-- kelos-editor-failure/v1 assessment-round-limit -->") {
+				want, readErr := os.ReadFile("testdata/assessment-limit.golden")
+				if readErr != nil {
+					t.Fatal(readErr)
+				}
+				// The notice names the request it belongs to, so a later limit is reported again.
+				wantNotice := strings.TrimSuffix(string(want), "\n")
+				if tc.comments == defectAfterRequest {
+					wantNotice = strings.Replace(wantNotice, "assessment-round-limit-0", "assessment-round-limit-500", 1)
+				}
+				if len(created) != 0 || len(posted) != 1 || posted[0] != wantNotice {
 					t.Fatalf("created=%d posted=%q", len(created), posted)
 				}
 				return
@@ -153,7 +177,11 @@ func TestDefectFoundByTheAssessmentStartsEditor(t *testing.T) {
 				t.Fatalf("assignment=%+v", assignment)
 			}
 			finding := assignment.Findings[0]
-			if finding.ID != "assessment/owner/repo/1/assessment-a" || !strings.HasSuffix(finding.Content, "Removing a Slot deletes an Item on the wrong Page.") || finding.Source != "https://github.com/owner/repo/pull/1#issuecomment-7" {
+			wantID := "assessment/owner/repo/1/0/assessment-a"
+			if tc.comments == defectAfterRequest {
+				wantID = "assessment/owner/repo/1/500/assessment-a"
+			}
+			if finding.ID != wantID || !strings.HasSuffix(finding.Content, "Removing a Slot deletes an Item on the wrong Page.") || finding.Source != "https://github.com/owner/repo/pull/1#issuecomment-7" {
 				t.Fatalf("finding=%+v", finding)
 			}
 		})

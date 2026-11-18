@@ -27,7 +27,8 @@ is `check/<owner>/<repo>/<pr>/<check run>`, so one failed run is assigned once;
 a repair that fails again is a new run and a new Task, for at most three per
 PR. Human feedback is handled first, a failed check before OCR findings. A red
 `verify-base` status is not repaired. A defect the merge assessment reports
-with `needs-fix` comes next, with at most two repairs per PR (ADR 0020).
+with `needs-fix` comes next, with at most three unattended repairs per
+`/reassess` (ADR 0020).
 
 The prompt requires editing from the assigned head, a remote-head recheck, and
 regular push only. Divergence stops work and preserves the workspace; no force

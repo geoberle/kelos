@@ -23,7 +23,13 @@ func TestFixRequest(t *testing.T) {
 		{
 			name:     "assessment that found a defect on the head becomes a finding",
 			comments: `[{"id":7,"html_url":"https://github.com/owner/repo/pull/1#issuecomment-7","user":{"login":"controller"},"body":"<!-- kelos-assessment/v1 -->\n{\"attempts\":[{\"task\":\"assessment-a\",\"head\":\"head\",\"state\":\"needs-fix\",\"reason\":\"Removing a Slot deletes an Item on the wrong Page.\"}]}"}]`,
-			wantID:   "assessment/owner/repo/1/assessment-a",
+			wantID:   "assessment/owner/repo/1/0/assessment-a",
+		},
+		{
+			// The ID names the newest /reassess on the pull request, so repairs are counted per request.
+			name:     "finding after a reassess request names that request",
+			comments: `[{"id":7,"html_url":"https://github.com/owner/repo/pull/1#issuecomment-7","user":{"login":"controller"},"body":"<!-- kelos-assessment/v1 -->\n{\"attempts\":[{\"task\":\"assessment-0\",\"head\":\"old\",\"request\":500,\"state\":\"invalidated\",\"reason\":\"PR head changed.\"},{\"task\":\"assessment-a\",\"head\":\"head\",\"state\":\"needs-fix\",\"reason\":\"Removing a Slot deletes an Item on the wrong Page.\"}]}"}]`,
+			wantID:   "assessment/owner/repo/1/500/assessment-a",
 		},
 		{
 			name:     "only the newest attempt counts",

@@ -30,9 +30,12 @@ commit is waited for and not logged as a failure.
 
 `needs-fix` is for a concrete defect in the change that the assessment can
 state with its trigger and consequence and that a code change can repair. The
-editor takes the reason as a finding, `assessment/<owner>/<repo>/<pr>/<task>`,
-and repairs it; the new head is reviewed and assessed again. At most two such
-repairs run per PR, then the controller reports once and waits for a person.
+editor takes the reason as a finding,
+`assessment/<owner>/<repo>/<pr>/<request>/<task>`, where the request is the
+newest `/reassess` comment on the PR or 0,
+and repairs it; the new head is reviewed and assessed again. At most three such
+repairs run unattended. Then the controller says so once and waits for a
+person; a `/reassess` allows three more.
 `needs-human` remains for what needs judgement: an accepted risk, licensing,
 behaviour that only hardware shows.
 
