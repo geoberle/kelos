@@ -1,0 +1,2 @@
+<!-- kelos-editor-failure/v1 assessment-round-limit-0 -->
+The merge assessment found another defect after 3 repairs, so the agents stop here. Comment `/reassess` to allow 3 more repairs, comment `/lgtm` to merge the pull request as it is, or describe the change you want in a comment.

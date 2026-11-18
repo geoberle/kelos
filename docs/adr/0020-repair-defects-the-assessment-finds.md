@@ -19,9 +19,12 @@ what needs judgement.
 Turning every `needs-human` reason into a repair was rejected: an editor
 cannot repair a licensing question or decide that a risk is acceptable.
 
-Assessment and repair may never agree, so at most two such repairs run per
-pull request; then the controller reports once and waits for a person. The
-assessment stays unable to change the branch itself.
+Assessment and repair may never agree, so at most three such repairs run
+unattended; then the controller says so once and waits for a person. The limit
+bounds unattended work, not the human's decisions: a `/reassess` allows three
+more. On hearthctl/lunactl#70 a limit of two per pull request had cut off the
+third of three real and different defects, and a `/reassess` could not get past
+it. The assessment stays unable to change the branch itself.
 
 The cost is that whether something is a repairable defect or a judgement call
 rests on the assessment agent, and a wrong `needs-fix` costs an editor run.

@@ -37,9 +37,9 @@ type Config struct {
 // recordedAnnotation marks an editor Task whose result is fully processed.
 const recordedAnnotation = "orchestrator.kelos.dev/result-recorded"
 
-// maxAssessmentRounds bounds the editor Tasks started for defects the
-// assessment found on one PR.
-const maxAssessmentRounds = 2
+// maxAssessmentRounds bounds the editor Tasks started unattended for defects
+// the assessment found on one PR. A /reassess from the human renews it.
+const maxAssessmentRounds = 3
 
 // maxReviewRounds bounds the editor Tasks started for OCR findings on one PR.
 const maxReviewRounds = 5
@@ -254,13 +254,19 @@ func reconcile(ctx context.Context, c *github.Client, cache *review.Cache, k dyn
 		return err
 	}
 	if defect != nil {
-		assigned, rounds, err := repairRounds(existing.Items, defect.ID, merge.FixPrefix)
+		// Repairs are counted since the human's newest /reassess: the limit
+		// bounds unattended work, and a request allows more of it.
+		request := merge.FixRequestOf(defect.ID)
+		assigned, rounds, err := repairRounds(existing.Items, defect.ID, defect.ID[:strings.LastIndex(defect.ID, "/")+1])
 		if err != nil || assigned {
 			return err
 		}
 		// Assessment and repair may never agree.
 		if rounds >= maxAssessmentRounds {
-			return reportLimit(ctx, c, owner, repo, pr, controllerLogin, "assessment-round-limit", fmt.Errorf("round limit of %d assessment repairs reached", maxAssessmentRounds))
+			cause := fmt.Errorf("round limit of %d assessment repairs reached", maxAssessmentRounds)
+			marker := "<!-- kelos-editor-failure/v1 assessment-round-limit-" + request + " -->"
+			body := marker + fmt.Sprintf("\nThe merge assessment found another defect after %d repairs, so the agents stop here. Comment `/reassess` to allow %d more repairs, comment `/lgtm` to merge the pull request as it is, or describe the change you want in a comment.", maxAssessmentRounds, maxAssessmentRounds)
+			return errors.Join(cause, postOnce(ctx, c, owner, repo, pr.GetNumber(), controllerLogin, marker, body))
 		}
 		return assign(ctx, c, k, config, owner, repo, pr, key, *defect)
 	}
@@ -597,15 +603,21 @@ func summaryCommentID(source, owner, repo string, number int) (int64, error) {
 func reportFailure(ctx context.Context, c *github.Client, owner, repo string, pr *github.PullRequest, task *unstructured.Unstructured, controller string, cause error) error {
 	marker := "<!-- kelos-editor-failure/v1 " + task.GetName() + " -->"
 	body := marker + "\nEditor Task " + task.GetName() + " requires human attention: " + cause.Error() + ". Preserve the retained Task, workspace, commits and pending feedback. Finish corrections manually, run CI and OCR, resolve review threads, then comment /lgtm. No automatic retry."
+	return errors.Join(cause, postOnce(ctx, c, owner, repo, pr.GetNumber(), controller, marker, body))
+}
+
+// postOnce posts the comment unless the controller already posted one that
+// starts with the marker.
+func postOnce(ctx context.Context, c *github.Client, owner, repo string, number int, controller, marker, body string) error {
 	opts := &github.IssueListCommentsOptions{ListOptions: github.ListOptions{PerPage: 100}}
 	for {
-		comments, response, err := c.Issues.ListComments(ctx, owner, repo, pr.GetNumber(), opts)
+		comments, response, err := c.Issues.ListComments(ctx, owner, repo, number, opts)
 		if err != nil {
-			return errors.Join(cause, err)
+			return err
 		}
 		for _, comment := range comments {
 			if comment.GetUser().GetLogin() == controller && strings.HasPrefix(comment.GetBody(), marker) {
-				return cause
+				return nil
 			}
 		}
 		if response.NextPage == 0 {
@@ -613,6 +625,6 @@ func reportFailure(ctx context.Context, c *github.Client, owner, repo string, pr
 		}
 		opts.Page = response.NextPage
 	}
-	_, _, err := c.Issues.CreateComment(ctx, owner, repo, pr.GetNumber(), &github.IssueComment{Body: &body})
-	return errors.Join(cause, err)
+	_, _, err := c.Issues.CreateComment(ctx, owner, repo, number, &github.IssueComment{Body: &body})
+	return err
 }
