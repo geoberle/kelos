@@ -28,14 +28,22 @@ decision is made, and an assessment would only repeat or contradict it. An
 explicit `/reassess` still starts one. A check that is still running on the
 commit is waited for and not logged as a failure.
 
-`needs-fix` is for a concrete defect in the change that the assessment can
-state with its trigger and consequence and that a code change can repair. The
-editor takes the reason as a finding,
+`needs-fix` is for concrete defects in the change that the assessment can
+state with their trigger and consequence and that a code change can repair. The
+first assessment of a pull request is the one thorough search: it is asked to
+keep looking after the first defect and to number every defect it finds in the
+reason. The editor takes the reason as one finding,
 `assessment/<owner>/<repo>/<pr>/<request>/<task>`, where the request is the
 newest `/reassess` comment on the PR or 0,
-and repairs it; the new head is reviewed and assessed again. At most three such
-repairs run unattended. Then the controller says so once and waits for a
-person; a `/reassess` allows three more.
+and repairs all of it; the new head is reviewed and assessed again.
+
+An assessment after such a repair only verifies. Its prompt quotes the defects
+the newest earlier assessment found and asks whether each is repaired and
+whether the changes made since are correct; it is told not to search for
+further defects. The record keeps those defects in `found` when their head is
+replaced, for the newest such attempt only. At most three repairs run
+unattended. Then the controller says so once and waits for a person; a
+`/reassess` allows three more.
 `needs-human` remains for what needs judgement: an accepted risk, licensing,
 behaviour that only hardware shows.
 

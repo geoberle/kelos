@@ -76,7 +76,7 @@ func TestFixRequest(t *testing.T) {
 				}
 				return
 			}
-			if finding == nil || finding.ID != tc.wantID || finding.Content != "The merge assessment found this defect in the pull request:\n\nRemoving a Slot deletes an Item on the wrong Page." || finding.Source != "https://github.com/owner/repo/pull/1#issuecomment-7" {
+			if finding == nil || finding.ID != tc.wantID || finding.Content != "The merge assessment found these defects in the pull request. Repair every one of them:\n\nRemoving a Slot deletes an Item on the wrong Page." || finding.Source != "https://github.com/owner/repo/pull/1#issuecomment-7" {
 				t.Fatalf("finding=%+v", finding)
 			}
 		})

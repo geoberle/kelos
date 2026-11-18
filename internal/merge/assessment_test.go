@@ -35,8 +35,25 @@ func TestCleanReviewCreatesAssessment(t *testing.T) {
 		binary bool
 		// approved puts a human approval of the head, recorded by the controller, on the pull request
 		approved bool
+		// earlier is the assessment record the pull request carries before the first poll
+		earlier string
+		// wantRecord is text the assessment record must hold after the polls
+		wantRecord string
+		// wantPrompt and noPrompt are texts the Task prompt must and must not hold
+		wantPrompt, noPrompt string
 	}{
 		{name: "clean current review creates retained assessment", state: "pending"},
+		{name: "first assessment is asked for every defect", state: "pending", wantPrompt: "do not stop at the first defect", noPrompt: "<earlier-defects>"},
+		{name: "assessment after a repair only verifies the earlier defects", state: "pending",
+			earlier:    `{"attempts":[{"task":"assessment-0","head":"old","state":"needs-fix","reason":"1. Removing a Slot deletes an Item on the wrong Page."}]}`,
+			wantRecord: `"found":"1. Removing a Slot deletes an Item on the wrong Page."`,
+			wantPrompt: "Do not search the pull request for further defects.\n\n<earlier-defects>\n1. Removing a Slot deletes an Item on the wrong Page.\n</earlier-defects>",
+			noPrompt:   "do not stop at the first defect"},
+		{name: "defects of an invalidated assessment are still verified", state: "pending",
+			earlier:    `{"attempts":[{"task":"assessment-0","head":"older","state":"invalidated","reason":"PR head changed.","found":"1. Stale."},{"task":"assessment-1","head":"old","state":"invalidated","reason":"PR head changed.","found":"1. Focus is lost."},{"task":"assessment-2","head":"old2","state":"invalidated","reason":"PR head changed."}]}`,
+			wantRecord: `{"task":"assessment-0","uid":"","head":"older","request":0,"started":"0001-01-01T00:00:00Z","state":"invalidated","reason":"PR head changed."}`,
+			wantPrompt: "<earlier-defects>\n1. Focus is lost.\n</earlier-defects>",
+			noPrompt:   "Stale."},
 		{name: "binary file the review excluded is named in the assessment", state: "pending", binary: true},
 		{name: "head a human approved is not assessed", approved: true},
 		{name: "new head during publication invalidates approval", response: `{"commit":"head","recommendation":"approve","reason":"Tested."}`, state: "invalidated", changedHead: true},
@@ -94,6 +111,9 @@ func TestCleanReviewCreatesAssessment(t *testing.T) {
 				archives[name] = b.Bytes()
 			}
 			var savedComments []*github.IssueComment
+			if len(tc.earlier) > 0 {
+				savedComments = append(savedComments, &github.IssueComment{ID: github.Ptr(int64(90)), User: &github.User{Login: github.Ptr("controller")}, Body: github.Ptr("<!-- kelos-assessment/v1 -->\n" + tc.earlier)})
+			}
 			var task map[string]any
 			creates := 0
 			approved := false
@@ -362,6 +382,15 @@ func TestCleanReviewCreatesAssessment(t *testing.T) {
 			unreviewed := "The code review could not read these binary files: vendor/font.ttf."
 			if strings.Contains(spec["prompt"].(string), unreviewed) != tc.binary {
 				t.Fatalf("binary=%v but prompt is:\n%s", tc.binary, spec["prompt"])
+			}
+			if !strings.Contains(spec["prompt"].(string), tc.wantPrompt) {
+				t.Fatalf("prompt lacks %q:\n%s", tc.wantPrompt, spec["prompt"])
+			}
+			if len(tc.noPrompt) > 0 && strings.Contains(spec["prompt"].(string), tc.noPrompt) {
+				t.Fatalf("prompt holds %q:\n%s", tc.noPrompt, spec["prompt"])
+			}
+			if !strings.Contains(savedComments[0].GetBody(), tc.wantRecord) {
+				t.Fatalf("record lacks %q:\n%s", tc.wantRecord, savedComments[0].GetBody())
 			}
 		})
 	}
